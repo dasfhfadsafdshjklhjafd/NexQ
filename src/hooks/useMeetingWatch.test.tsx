@@ -110,6 +110,10 @@ describe("meeting watcher",() => {
 
 
 it("waits for a stable statement boundary and then releases an imperative to the watcher", () => {
+  expect(stableScanPrefix("Previous clause. Routine narration.", "Previous clause. Routine narration. More words")).toBe("Previous clause.");
+  expect(stableScanPrefix("Other candidates can't.", "Other candidates can't. Next")).toBe("Other candidates can't.");
+  expect(stableScanPrefix("Can teams own it?", "When can teams own it?")).toBe("");
+  expect(stableScanPrefix("Who runs   this?", "Who runs this?")).toBe("Who runs this?");
   expect(stableScanPrefix("Tell me about sales.", "Tell me about support.")).toBe("");
   expect(stableScanPrefix("Tell me about support.", "Tell me about support. ")).toBe("");
   expect(stableScanPrefix("Tell me about support.", "Tell me about support. For example")).toBe("Tell me about support.");

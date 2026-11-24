@@ -37,14 +37,20 @@ export function scanBatch(lines: Line[], checked: Map<string,string>) {
 // sentence only after the same words and punctuation survive a new decode.
 // For a period or exclamation, also wait for the speaker to start the next
 // phrase: a trailing period on the latest hypothesis may still move.
+const promptCue = /\b(?:what|which|who|when|where|why|how|(?:can|could|would|will|did|do|does|have|has|are|is)\s+(?:you|we|there)|tell\s+(?:me|us)|walk\s+(?:me|us)\s+through|describe|explain|give\s+(?:me|us)|show\s+(?:me|us)|talk\s+(?:me|us)\s+through)\b/iu;
 export function stableScanPrefix(previous:string, current:string):string {
-  const complete = /[^.!?。？！\\n]+[.!?。？！]/gu;
-  const normalize = (s:string) => s.trim().toLowerCase().replace(/\\s+/g," ");
+  const complete = /[^.!?。？！\n]+[.!?。？！]/gu;
+  const normalize = (s:string) => s.trim().toLowerCase().replace(/\s+/g," ");
   const previousSentences = new Set(Array.from(previous.matchAll(complete), m => normalize(m[0])));
   let end = 0;
   for (const m of current.matchAll(complete)) {
     const boundary = m.index! + m[0].length;
-    if (!/[?？]$/u.test(m[0]) && !current.slice(boundary).trim()) continue;
+    if (!/[?？]$/u.test(m[0])) {
+      if (!current.slice(boundary).trim()) continue;
+      // The opening clause can finish a question begun in the previous ASR line.
+      // Later statements can wait for the final unless they contain a prompt.
+      if (m.index !== 0 && !promptCue.test(m[0])) continue;
+    }
     if (previousSentences.has(normalize(m[0]))) end = boundary;
   }
   return current.slice(0,end);
