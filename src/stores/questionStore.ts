@@ -23,6 +23,8 @@ export interface AutoAnswerRef {
 
 /** Text of each final line when it was last checked for a question. */
 const checkedText = new Map<string, string>();
+// Keep identities after a card scrolls out or is dismissed. Reset per meeting.
+const recentQuestions = new Map<string, { id: string; at: number }>();
 
 /**
  * Lines from a provider that detects turns (Cartesia, Deepgram Flux): Auto-Answer
@@ -36,6 +38,7 @@ interface QuestionState {
   panelSeen: boolean;
 
   addQuestion: (question: DetectedQuestion, segmentId?: string) => void;
+  addLineQuestion: (question: DetectedQuestion, segmentId: string) => boolean;
   /** Records a final line's text. False when it was already checked as it is. */
   checkLine: (id: string, text: string) => boolean;
   setPanelSeen: () => void;
@@ -59,7 +62,7 @@ interface QuestionState {
 
 // The panel unmounts on a layout switch and while Settings is open, so what it
 // has found and answered lives here, for the meeting.
-export const useQuestionStore = create<QuestionState>((set) => ({
+export const useQuestionStore = create<QuestionState>((set, get) => ({
   questions: [],
   panelSeen: false,
   autoAnswer: null,
@@ -76,8 +79,17 @@ export const useQuestionStore = create<QuestionState>((set) => ({
         }
       }
       if (prev.length > 0 && prev[0].text === q.text) return state;
-      return { questions: [{ ...q, assisted: false, segmentId }, ...prev].slice(0, 10) };
+      return { questions: [{ ...q, assisted: false, segmentId }, ...prev].filter((p, i) => i < 10 || (!p.assisted && !p.heldBack)) };
     }),
+
+  addLineQuestion: (q, id) => {
+    const key = q.text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    const previous = recentQuestions.get(key);
+    if (previous && (previous.id === id || Math.abs(q.timestamp_ms - previous.at) <= 90_000)) return false;
+    recentQuestions.set(key, { id, at: q.timestamp_ms });
+    get().addQuestion(q, id);
+    return true;
+  },
 
   checkLine: (id, text) => {
     if (checkedText.get(id) === text) return false;
@@ -102,6 +114,7 @@ export const useQuestionStore = create<QuestionState>((set) => ({
 
   clear: () => {
     checkedText.clear();
+    recentQuestions.clear();
     turnLines.clear();
     set({ questions: [], panelSeen: false, autoAnswer: null });
   },

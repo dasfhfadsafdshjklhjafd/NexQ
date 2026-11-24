@@ -23,7 +23,7 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   cancelGeneration: vi.fn(() => Promise.resolve()),
 }));
 
-import { AUTO_TRIGGER_DELAY_MS, QuestionDetector, QuestionPanel, lastSentence, looksLikeQuestion } from "./QuestionDetector";
+import { AUTO_TRIGGER_DELAY_MS, QuestionDetector, QuestionPanel, lastSentence, looksLikeQuestion, lineQuestions } from "./QuestionDetector";
 import { runUserAction } from "../lib/userAction";
 import { cancelGeneration } from "../lib/ipc";
 import { useStreamStore } from "../stores/streamStore";
@@ -443,6 +443,44 @@ describe("QuestionDetector", () => {
 
     act(() => useTranscriptStore.setState({ segments: [seg("So here's the situation. What would you do?")] }));
     expect(screen.getByText(/What would you do\?/)).toBeTruthy();
+  });
+});
+
+describe("continuous interviewer speech", () => {
+  const q1 = "how would you deduplicate this table.";
+  const q2 = "what would you build for our team?";
+  const recap = "That was a clear answer to that interview question, when do you use an index? ";
+  const intro = "Interview question number seven of our ten practice questions is, ";
+  const first = recap + intro + q1 + " Here is an example. I bring experience. ";
+  const both = first + "Interview question number eight is what would you build? for our team the speaker continues.";
+
+  it("extracts the two new prompts and ignores retrospective narration", () => {
+    expect(lineQuestions(both).map(q => q.text)).toEqual([q1, q2]);
+    expect(lineQuestions(intro + "how would you deduplicate this...")).toEqual([]);
+  });
+
+  it("automatically drains later questions once each while the line grows and an answer is busy", async () => {
+    vi.useFakeTimers();
+    setAutoTrigger(true);
+    answersRunUntilStopped();
+    useTranscriptStore.setState({ segments: [] });
+    render(<QuestionPanel />);
+    send(seg(first));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    send(seg(first + " Still explaining the answer."));
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(askedFor()).toEqual([q1]);
+    send(seg(both));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(askedFor()).toEqual([q1]);
+    act(() => useStreamStore.setState({ isStreaming: false, phase: "idle" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(AUTO_TRIGGER_DELAY_MS); });
+    expect(askedFor()).toEqual([q1,q2]);
+    expect(cancelGeneration).not.toHaveBeenCalled();
+    act(() => useStreamStore.setState({ isStreaming: false, phase: "idle" }));
+    send({ ...seg(both), id: "replayed", timestamp_ms: 5000 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(askedFor()).toEqual([q1,q2]);
   });
 });
 

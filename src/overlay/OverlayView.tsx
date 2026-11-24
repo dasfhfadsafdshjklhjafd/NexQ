@@ -365,8 +365,7 @@ export function OverlayView() {
         )}
 
         {/* ── RIGHT ── */}
-        {layoutMode !== "transcript" ? (
-        <div className="flex min-w-[180px] min-h-0 flex-1 basis-[220px] flex-col gap-2.5 overflow-hidden">
+        <div className={layoutMode === "transcript" ? "hidden" : "flex min-w-[180px] min-h-0 flex-1 basis-[220px] flex-col gap-2.5 overflow-hidden"}>
           <QuestionPanel />
 
           {/* AI Response */}
@@ -379,7 +378,7 @@ export function OverlayView() {
             </div>
           </div>
         </div>
-        ) : (
+        {layoutMode === "transcript" && (
           <div
             className="flex min-h-0 w-8 shrink-0 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl bg-card/20 transition-all duration-200 hover:bg-card/30"
             onClick={() => setLayoutMode("split")}

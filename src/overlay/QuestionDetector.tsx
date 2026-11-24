@@ -6,6 +6,7 @@ import {
   REFUSED, answerRunning, autoAnswerRunning, decideTurnStep, inTurn, logAutoAnswer, runYourAction, sameQuestion,
   stopAutoAnswer,
 } from "../lib/autoAnswer";
+import { useStreamStore } from "../stores/streamStore";
 import { useTranscriptStore } from "../stores/transcriptStore";
 import { useAIActionsStore } from "../stores/aiActionsStore";
 import { useQuestionStore } from "../stores/questionStore";
@@ -78,6 +79,32 @@ export function lastSentence(text: string): string {
   return (sentences[last] ?? "").trim();
 }
 
+/** Find each prompt in a growing ASR paragraph, even between runs of narration. */
+export function lineQuestions(line: string): { text: string; offset: number }[] {
+  const result: { text: string; offset: number }[] = [];
+  for (const part of line.matchAll(/[^.?!。？！\n]+[.?!。？！]*/gu)) {
+    const raw = part[0].trim();
+    // Interview tutorials often quote the last prompt while reviewing its answer.
+    if (/\b(?:answer|response)\s+to\s+(?:that|the|this|your|our|my|the previous|the last)\s+(?:interview\s+)?question\b/i.test(raw)) continue;
+    const intro = /\b(?:interview\s+)?question\s+(?:(?:number\s+)?(?:\d+|[a-z]+(?:-[a-z]+)?)(?:\s+of\b[^.!?]{0,120}?)?\s+)?(?:is|asks?)\s*[:,–—-]?\s+|\b(?:next|first|last|interview)\s+question\s*[:,–—-]\s*/i.exec(raw);
+    let text = intro ? raw.slice(intro.index + intro[0].length).trim() : raw;
+    if (!text || /(?:\.{2,}|…)$/.test(text)) continue;
+    if (!looksLikeQuestion(text) && /^(?:and|so|okay|now)[,\s]+/i.test(text)) {
+      const stripped = text.replace(/^(?:and|so|okay|now)[,\s]+/i, "");
+      if (looksLikeQuestion(stripped)) text = stripped;
+    }
+    if (!looksLikeQuestion(text)) continue;
+    // A short prepositional complement sometimes lands just beyond a spurious question mark.
+    if (/\?$/.test(text)) {
+      const tail = line.slice(part.index! + part[0].length);
+      const complement = /^\s+((?:for|with|at|from|to)\s+(?:us|them|you|him|her|me|this company|our company|our team))\b/i.exec(tail);
+      if (complement && /^[a-z]/.test(complement[1])) text = text.slice(0, -1) + " " + complement[1] + "?";
+    }
+    result.push({ text, offset: part.index! + part[0].search(/\S/) });
+  }
+  return result;
+}
+
 /**
  * Starts an automatic answer to `question` (a line's question), unless another
  * answer is running: then the question stays a card to click.
@@ -92,12 +119,12 @@ function startAutoAnswer(question: DetectedQuestion, segmentId: string | undefin
   if (segmentId !== undefined) store.answerLine(question, segmentId);
   const requestId = crypto.randomUUID();
   const done = runUserAction("Assist", question.text, { requestId }).catch((err) => {
-    // Refused: an answer started elsewhere in the meantime.
-    if (!String(err).includes(REFUSED)) return;
+    // Keep failed questions available to retry.
     const now = useQuestionStore.getState();
     now.holdBack(segmentId, question.text);
     if (now.autoAnswer?.requestId === requestId) now.setAutoAnswer(null);
     logAutoAnswer("held");
+    if (!String(err).includes(REFUSED)) showToast("Auto-Answer failed. The question is available to retry.", "error");
   });
   if (segmentId !== undefined) store.setAutoAnswer({ requestId, segmentId, question: question.text, early, done });
   logAutoAnswer(early ? "early" : "answered", detail);
@@ -147,14 +174,7 @@ export function QuestionDetector() {
   const justMountedRef = useRef(true);
   const segments = useTranscriptStore((s) => s.segments);
   const autoTrigger = useAIActionsStore((s) => s.configs.globalDefaults.autoTrigger);
-  // Changes whenever the other party says more (a new line, or a line growing).
-  const otherPartyActivity = useTranscriptStore((s) => {
-    for (let i = s.segments.length - 1; i >= 0; i--) {
-      const seg = s.segments[i];
-      if (isOtherParty(seg.speaker)) return `${seg.id}:${seg.text.length}`;
-    }
-    return "";
-  });
+  const busy = useStreamStore((s) => s.isStreaming || s.phase === "sending");
 
   useEffect(() => {
     const p = onQuestionDetected((event) => {
@@ -189,16 +209,22 @@ export function QuestionDetector() {
     for (const seg of segments) {
       if (!seg.is_final || !checkLine(seg.id, seg.text)) continue;
       if (!isOtherParty(seg.speaker)) continue;
-      const sentence = lastSentence(seg.text);
-      if (sentence && looksLikeQuestion(sentence)) {
-        addQuestion({ text: sentence, confidence: 0.8, timestamp_ms: seg.timestamp_ms, source: seg.speaker }, seg.id);
+      if (seg.turn || store.isTurnLine(seg.id)) {
+        const sentence = lastSentence(seg.text);
+        if (sentence && looksLikeQuestion(sentence)) addQuestion({ text: sentence, confidence: 0.8, timestamp_ms: seg.timestamp_ms, source: seg.speaker }, seg.id);
+        continue;
+      }
+      for (const {text: sentence, offset} of lineQuestions(seg.text)) {
+        const id = seg.id + "#" + offset;
+        const q = { text: sentence, confidence: 0.8, timestamp_ms: seg.timestamp_ms, source: seg.speaker };
+        if (!store.addLineQuestion(q, id)) continue;
         // The line grew into another question after Auto-Answer answered it:
         // that answer was for an incomplete question and gives way. (Lines
         // with turn signals are handled on those signals.)
         const ref = store.autoAnswer;
-        if (autoTrigger && ref && ref.segmentId === seg.id && !sameQuestion(ref.question, sentence) && !store.isTurnLine(seg.id)) {
+        if (autoTrigger && ref && ref.segmentId === id && !sameQuestion(ref.question, sentence)) {
           store.setAutoAnswer(null);
-          store.reviseLine(seg.id, sentence);
+          store.reviseLine(id, sentence);
           logAutoAnswer("withdrawn");
           void inTurn(() => stopAutoAnswer(ref));
         }
@@ -233,22 +259,26 @@ export function QuestionDetector() {
   const latest = questions.length > 0 ? questions[0] : null;
   const previousQuestions = questions.slice(1, 4);
 
-  // Auto-Trigger: answer the newest question once the other party has been
-  // quiet for a moment. More words from them restart the wait. Lines from a
-  // provider that detects turns are answered on its signals instead.
-  const waiting = autoTrigger && !!latest && !latest.assisted && !latest.heldBack
-    && !useQuestionStore.getState().isTurnLine(latest.segmentId);
-  const autoAssist = useCallback(() => {
-    const q = useQuestionStore.getState().questions[0];
-    if (!q || q.assisted || q.heldBack) return;
-    useQuestionStore.getState().markAssisted(0);
-    startAutoAnswer(q, q.segmentId, false, "after the quiet wait");
-  }, []);
+  // Settle the question itself. Unrelated narration must not postpone it.
+  // Oldest first, so a second question arriving during generation waits its turn.
+  const pending = questions.slice().reverse().find(q => !q.assisted && !q.heldBack
+    && !useQuestionStore.getState().isTurnLine(q.segmentId));
+  const revising = pending && segments.some(seg => !seg.is_final && pending.segmentId?.startsWith(seg.id + "#")
+    && !seg.text.includes(pending.text));
+  const partialContinuation = pending && !/[.?!。？！]$/.test(pending.text) && segments.some(seg =>
+    !seg.is_final && pending.segmentId?.startsWith(seg.id + "#"));
   useEffect(() => {
-    if (!waiting) return;
-    const timer = setTimeout(() => void inTurn(autoAssist), AUTO_TRIGGER_DELAY_MS);
+    if (!autoTrigger || !pending || busy || revising || partialContinuation) return;
+    const timer = setTimeout(() => void inTurn(() => {
+      if (answerRunning() || !useAIActionsStore.getState().configs.globalDefaults.autoTrigger) return;
+      const store = useQuestionStore.getState();
+      const index = store.questions.findIndex(q => q === pending);
+      if (index < 0 || pending.assisted || pending.heldBack) return;
+      store.markAssisted(index);
+      startAutoAnswer(pending, pending.segmentId, false, "after the question settled");
+    }), AUTO_TRIGGER_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [waiting, latest?.text, otherPartyActivity, autoAssist]);
+  }, [autoTrigger, pending, busy, revising, partialContinuation]);
 
   return (
     <div className="flex flex-col gap-2.5" role="region" aria-label="Detected questions">

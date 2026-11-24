@@ -1,0 +1,32 @@
+name: Hands-free Windows build
+on:
+  push:
+    branches: [hands-free-auto-answer]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm test
+      - run: npm run tauri -- build --no-bundle
+      - name: Package portable Windows app
+        shell: pwsh
+        run: |
+          $dest = New-Item -ItemType Directory -Path NexQ-Hands-Free
+          Copy-Item -LiteralPath src-tauri/target/release/nexq.exe -Destination $dest
+          Copy-Item -Path src-tauri/ort/*.dll -Destination $dest
+          if (!(Test-Path -LiteralPath (Join-Path $dest 'onnxruntime.dll'))) { throw 'Missing speech runtime' }
+      - uses: actions/upload-artifact@v6
+        with:
+          name: NexQ-Hands-Free-Windows-x64
+          path: NexQ-Hands-Free/
+          if-no-files-found: error
