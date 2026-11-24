@@ -14,7 +14,7 @@ import { showToast } from "../stores/toastStore";
 import { useConfigStore } from "../stores/configStore";
 
 /** Why a pasted image is refused when the provider can't read images. */
-export const IMAGES_NEED_CLAUDE = "Images work only with Claude (subscription). Choose it in Settings > LLM.";
+export const IMAGES_NEED_CLAUDE = "Images require Claude (subscription) or a Custom endpoint with vision support.";
 
 /**
  * The Ask box placeholder. Short enough to show whole in the overlay's Ask box
@@ -26,8 +26,7 @@ export function askPlaceholder(canAttach: boolean): string {
 
 /**
  * Images pasted (Ctrl+V) into an Ask box. A paste that carries text, or no
- * image, is left alone, so plain text pastes as usual. Only the Claude
- * (subscription) provider can read images: with another one a pasted image is
+ * image, is left alone, so plain text pastes as usual. For providers without image support, a pasted image is
  * refused with a hint instead of being attached and failing on send.
  */
 export function useAskImages() {

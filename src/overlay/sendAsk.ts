@@ -7,7 +7,7 @@ import { showToast } from "../stores/toastStore";
  * the task itself (a question, an exercise), not something to describe.
  */
 export const DEFAULT_IMAGE_QUESTION =
-  "The attached image is the task or question to handle. Read it and answer or solve it directly, in the context of the meeting. Do not describe the image.";
+  "Answer the question shown in the attached screenshot(s). Give the answer first, then briefly walk through how to get it. Include a query or calculation when appropriate. If essential text is unreadable, say which part.";
 
 /** The toast for a rejected send. Tauri rejects with plain text: with an image, say why. */
 export function askErrorMessage(err: unknown, withImages: boolean, fallback: string): string {

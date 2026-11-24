@@ -160,6 +160,9 @@ impl CustomClient {
             Attempt::Stream(resp) => return Ok(resp),
             Attempt::Failed(text) | Attempt::Unreachable(text) => text,
         };
+        if !params.images.is_empty() {
+            return Err(LLMError::ProviderError(format!("Custom image request failed: {}", first)));
+        }
         log::warn!("CustomLLM: /chat/completions failed; trying /api/chat");
 
         let (second, unreachable) = match self
@@ -453,7 +456,7 @@ impl LLMProvider for CustomClient {
 
         thinking::apply_prompt_hint(&mut messages, model, thinking::resolve(&params, self.options.thinking));
 
-        let msgs: Vec<serde_json::Value> = messages
+        let mut msgs: Vec<serde_json::Value> = messages
             .iter()
             .map(|m| {
                 json!({
@@ -462,6 +465,17 @@ impl LLMProvider for CustomClient {
                 })
             })
             .collect();
+
+        if !params.images.is_empty() {
+            let user = msgs.iter_mut().rev().find(|m| m["role"] == "user")
+                .ok_or_else(|| LLMError::ProviderError("Image request has no user message".into()))?;
+            let mut parts = vec![json!({"type": "text", "text": user["content"]})];
+            for image in &params.images {
+                parts.push(json!({"type": "image_url", "image_url": {"url":
+                    format!("data:{};base64,{}", image.media_type, image.data)}}));
+            }
+            user["content"] = serde_json::Value::Array(parts);
+        }
 
         // NOTE: llm_stream_start is emitted by IntelligenceEngine::generate_assist()
         // with the correct mode. Do NOT emit it here — it would overwrite the mode.

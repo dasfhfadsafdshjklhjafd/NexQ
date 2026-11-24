@@ -1042,6 +1042,7 @@ pub async fn generate_assist(
                 cancel: Some(cancel_token.clone()),
                 thinking: Default::default(),
                 thinking_auto_off: false,
+                images: Vec::new(),
             },
             cancel: cancel_token.clone(),
             images: &images,
@@ -1076,31 +1077,6 @@ pub async fn generate_assist(
             ..GenerationParams::default()
         };
         emit_activity(&app_handle, &params, sources_unavailable_notice());
-    }
-
-    // Only a Claude session carries images; no other route can send them, and
-    // answering without the image would silently ignore what the user attached.
-    if !images.is_empty() {
-        let active = state
-            .llm
-            .as_ref()
-            .and_then(|l| l.lock().ok())
-            .and_then(|r| r.active_provider_type().cloned());
-        let message = images_refusal(active.as_ref()).to_string();
-        // End the stream too: a session attempt above may already have started
-        // it, and the frontend ignores errors for streams it never started, so
-        // this is harmless otherwise (the rejection below reports it then).
-        emit_error(
-            &app_handle,
-            &GenerationParams {
-                request_id: Some(request_id.clone()),
-                cancel: Some(cancel_token.clone()),
-                ..GenerationParams::default()
-            },
-            &message,
-        );
-        drop(generation_guard);
-        return Err(message);
     }
 
     // Determine transcript window: per-action override or global default,
@@ -1191,6 +1167,24 @@ pub async fn generate_assist(
         stateless_provider(&state, &app_handle, &route, &params).await?
     };
 
+    if !images.is_empty() && (!matches!(route, Route::Stateless) || provider_type != Some(ProviderType::Custom)) {
+        let message = images_refusal(provider_type.as_ref()).to_string();
+        // End the stream too: a session attempt above may already have started
+        // it, and the frontend ignores errors for streams it never started, so
+        // this is harmless otherwise (the rejection below reports it then).
+        emit_error(
+            &app_handle,
+            &GenerationParams {
+                request_id: Some(request_id.clone()),
+                cancel: Some(cancel_token.clone()),
+                ..GenerationParams::default()
+            },
+            &message,
+        );
+        drop(generation_guard);
+        return Err(message);
+    }
+
     // Check for active Gemini context cache — only applies when Gemini is the provider
     let active_cache_name = if provider_type == Some(ProviderType::Gemini) {
         state.gemini_cache
@@ -1213,6 +1207,7 @@ pub async fn generate_assist(
         cancel: Some(cancel_token.clone()),
         thinking: Default::default(),
         // The background JSON tasks want no thinking unless the user chose otherwise.
+        images,
         thinking_auto_off: matches!(mode.as_str(), "ActionItemsExtraction" | "BookmarkSuggestions"),
     };
 

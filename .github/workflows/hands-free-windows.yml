@@ -1,7 +1,7 @@
 name: Hands-free Windows build
 on:
   push:
-    branches: [hands-free-auto-answer]
+    branches: [hands-free-auto-answer, screenshot-ask]
   workflow_dispatch:
 permissions:
   contents: read

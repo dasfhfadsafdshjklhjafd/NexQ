@@ -163,7 +163,8 @@ describe("ModeButtons Ask box with a pasted image", () => {
     expect(await screen.findByRole("group", { name: "Attached images" })).toBeTruthy();
   });
 
-  it("an empty box with an image sends the default question with the image", async () => {
+  it.each(["claude_cli", "custom"] as const)("an empty %s Ask sends the default question with the pasted image", async (llmProvider) => {
+    useConfigStore.setState({llmProvider});
     render(<ModeButtons />);
     openAsk();
     await pasteImage("a");

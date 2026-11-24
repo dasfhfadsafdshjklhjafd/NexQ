@@ -13,6 +13,8 @@ pub use super::thinking::ThinkingSetting;
 /// `None` fields mean "use provider default" — they won't be sent in the HTTP body.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationParams {
+    #[serde(skip)]
+    pub images: Vec<super::cli_agent::protocol::ImageAttachment>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<u64>,
     /// Gemini context cache name (e.g. "cachedContents/abc123").
@@ -48,6 +50,7 @@ pub struct GenerationParams {
 impl Default for GenerationParams {
     fn default() -> Self {
         Self {
+            images: Vec::new(),
             temperature: None,
             max_tokens: None,
             cache_name: None,
