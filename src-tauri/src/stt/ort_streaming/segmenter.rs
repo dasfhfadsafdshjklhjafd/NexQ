@@ -19,6 +19,8 @@ const PAUSE_SAMPLES: usize = 12_800;
 const MIN_SEGMENT_SAMPLES: usize = SAMPLE_RATE as usize;
 /// A segment never grows past this (20 s).
 const MAX_SEGMENT_SAMPLES: usize = SAMPLE_RATE as usize * 20;
+/// Minimum new audio between provisional decodes (one second).
+const PREVIEW_SAMPLES: usize = SAMPLE_RATE as usize;
 /// With no audio arriving for this long, what is buffered is decoded.
 const IDLE_FLUSH: Duration = Duration::from_millis(800);
 /// How long one wait for audio lasts before the stop flag and idle time are checked.
@@ -68,6 +70,9 @@ pub(super) fn segment_loop(
     let mut heard = false;
     // Epoch ms of the buffer's first sample.
     let mut segment_start_ms = 0u64;
+    let mut last_preview = String::new();
+    let mut next_preview_samples = PREVIEW_SAMPLES;
+    let mut preview_after = Instant::now();
     let mut received = Instant::now();
     loop {
         let mut finished = false;
@@ -106,21 +111,49 @@ pub(super) fn segment_loop(
                 flush = finished || received.elapsed() >= IDLE_FLUSH;
             }
         }
-        if flush && !samples.is_empty() {
-            let text = if heard { recognize(&samples)? } else { String::new() };
+        // Decode a provisional prefix without consuming it. A slow recognizer
+        // gets extra wall time between previews so final results have priority.
+        let preview = !flush && heard && silence == 0 && samples.len() >= next_preview_samples
+            && Instant::now() >= preview_after;
+        if (flush || preview) && !samples.is_empty() {
+            let started = Instant::now();
+            let decoded = if heard { recognize(&samples) } else { Ok(String::new()) };
             let duration_ms = samples.len() as u64 * 1000 / SAMPLE_RATE as u64;
-            samples.clear();
-            silence = 0;
-            heard = false;
-            if !text.is_empty() {
-                result_tx.blocking_send(TranscriptResult {
-                    text, is_final: true, confidence: 0.9,
-                    timestamp_ms: segment_start_ms,
-                    speaker: None, language: crate::stt::provider::reported_language(language), segment_id: Some(format!("ort_{segment}")),
-                    duration_ms: Some(duration_ms), speaker_tag: None,
-                    turn: None,
-                }).map_err(|e| e.to_string())?;
-                segment += 1;
+            let result = |text, is_final| TranscriptResult {
+                text, is_final, confidence: if is_final { 0.9 } else { 0.7 },
+                timestamp_ms: segment_start_ms, speaker: None,
+                language: crate::stt::provider::reported_language(language),
+                segment_id: Some(format!("ort_{segment}")), duration_ms: Some(duration_ms),
+                speaker_tag: None, turn: None,
+            };
+            if preview {
+                next_preview_samples = samples.len() + PREVIEW_SAMPLES;
+                preview_after = Instant::now() + started.elapsed().saturating_mul(3).max(Duration::from_millis(700));
+                // Short prefixes sometimes cannot be decoded. The final still
+                // gets the complete audio and normal error handling.
+                if let Ok(text) = decoded {
+                    if !text.is_empty() && text != last_preview {
+                        match result_tx.try_send(result(text.clone(), false)) {
+                            Ok(()) => last_preview = text,
+                            Err(mpsc::error::TrySendError::Full(_)) => {}
+                            Err(mpsc::error::TrySendError::Closed(_)) => return Ok(()),
+                        }
+                    }
+                }
+            } else {
+                let text = decoded?;
+                if !text.is_empty() {
+                    result_tx.blocking_send(result(text, true)).map_err(|e| e.to_string())?;
+                    segment += 1;
+                } else if !last_preview.is_empty() {
+                    result_tx.blocking_send(TranscriptResult::clear_interim()).map_err(|e| e.to_string())?;
+                }
+                samples.clear();
+                last_preview.clear();
+                next_preview_samples = PREVIEW_SAMPLES;
+                preview_after = Instant::now();
+                silence = 0;
+                heard = false;
             }
         }
         if finished { return Ok(()); }
@@ -188,6 +221,29 @@ mod tests {
         let (lengths, results) = run_queued(vec![AudioMessage::Samples(speech(20_000))], &[], 0);
         assert_eq!(lengths, [320_000]);
         assert_eq!(results[0].duration_ms, Some(20_000));
+    }
+
+    #[test]
+    fn continuous_speech_previews_then_replaces_the_same_line() {
+        let (lengths, results) = run_queued(vec![
+            AudioMessage::Samples(speech(1000)), AudioMessage::Samples(speech(200)), AudioMessage::Stop,
+        ], &["in", "index"], 4);
+        assert_eq!(lengths, [16_000, 19_200]);
+        assert_eq!(results.len(), 2);
+        assert!(!results[0].is_final);
+        assert!(results[1].is_final);
+        assert_eq!(results[0].text, "in");
+        assert_eq!(results[1].text, "index");
+        assert_eq!(results[0].segment_id, results[1].segment_id);
+        assert_eq!(results[0].timestamp_ms, results[1].timestamp_ms);
+    }
+
+    #[test]
+    fn an_empty_final_clears_the_provisional_text() {
+        let (_, results) = run_queued(vec![AudioMessage::Samples(speech(1000)), AudioMessage::Stop],
+            &["possible word", ""], 0);
+        assert_eq!(results.len(), 2);
+        assert!(results[1].is_interim_clear());
     }
 
     #[test]

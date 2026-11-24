@@ -18,6 +18,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run tauri -- build --no-bundle
+      - name: Test native speech segment boundaries and previews
+        run: cargo test --release --manifest-path src-tauri/Cargo.toml --lib stt::ort_streaming::segmenter::tests
       - name: Package portable Windows app
         shell: pwsh
         run: |
