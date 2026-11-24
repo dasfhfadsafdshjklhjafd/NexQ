@@ -368,7 +368,8 @@ export function OverlayView() {
         <div className={layoutMode === "transcript" ? "hidden" : "flex min-w-[180px] min-h-0 flex-1 basis-[220px] flex-col gap-2.5 overflow-hidden"}>
           <QuestionPanel />
 
-          {/* AI Response */}
+          {/* The detector stays mounted while the response pane is collapsed. */}
+          {layoutMode !== "transcript" && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-card/20">
             <div className="flex shrink-0 items-center gap-1 border-b border-border/20 px-2.5 py-1.5">
               <ModeButtons />
@@ -377,6 +378,7 @@ export function OverlayView() {
               <AIResponsePanel />
             </div>
           </div>
+          )}
         </div>
         {layoutMode === "transcript" && (
           <div
