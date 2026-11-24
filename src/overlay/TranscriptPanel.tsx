@@ -209,7 +209,7 @@ export function TranscriptPanel({ onOpenDevLog }: { onOpenDevLog?: () => void } 
           )}
         </div>
         {isRecording && (
-          <div className={`${showTools ? "block" : "hidden"} sm:block mx-1 mb-1.5 space-y-1`}>
+          <div className="mx-1 mb-1.5 space-y-1">
             {isInPerson ? (
               <AudioActivityBar
                 icon={<Radio className="h-3.5 w-3.5" />}
@@ -259,7 +259,7 @@ export function TranscriptPanel({ onOpenDevLog }: { onOpenDevLog?: () => void } 
     <div className="flex flex-1 min-h-0 flex-col">
       <NoTranscriptBanner onOpenDevLog={onOpenDevLog} />
       {/* Search bar (shown when there's a search query or toggled) */}
-      <div className="flex items-center gap-2 rounded-lg bg-muted/20 mx-1 mt-1 mb-1.5 px-2.5 py-1.5">
+      <div className={`${showTools || isSearchVisible ? "flex" : "hidden"} sm:flex items-center gap-2 rounded-lg bg-muted/20 mx-1 mt-1 mb-1.5 px-2.5 py-1.5`}>
         <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
         <input
           type="text"
@@ -295,7 +295,7 @@ export function TranscriptPanel({ onOpenDevLog }: { onOpenDevLog?: () => void } 
         onWheel={cancelScrollAnimation}
         onTouchMove={cancelScrollAnimation}
         data-scroll-container
-        className="absolute inset-0 overflow-y-auto px-1 pt-1 pb-8"
+        className="absolute inset-0 overflow-y-auto px-1 pt-1 pb-1 sm:pb-8"
       >
         {filteredSegments.map((seg) => (
           <TranscriptLine
@@ -330,7 +330,7 @@ export function TranscriptPanel({ onOpenDevLog }: { onOpenDevLog?: () => void } 
 
       {/* Live audio activity indicators — mode-aware */}
       {isRecording && (
-        <div className="mx-1 mb-1.5 space-y-1">
+        <div className={`${showTools ? "block" : "hidden"} sm:block mx-1 mb-1.5 space-y-1`}>
           {isInPerson ? (
             <AudioActivityBar
               icon={<Radio className="h-3.5 w-3.5" />}
