@@ -39,7 +39,7 @@ export function QuestionHistory({mode,progress,onRetry}: {
   return <details onToggle={e => setExpanded(e.currentTarget.open)} className="text-xs text-muted-foreground">
     <summary className="cursor-pointer px-2 py-1" aria-label="Meeting question history">
       {answered}/{actionable.length} answered · {queued} queued{working > 0 && " · answering"}
-      <span className="block text-meta">{local ? "Local detector" : mode === "retrying" ? "Watcher retrying" :
+      <span className="block text-meta">{local || mode === "fallback" ? "Local detector" : mode === "retrying" ? "Watcher retrying" :
         mode === "connecting" ? "Connecting watcher" : "AI watcher"} · {count}/{finals.length} final lines checked
         {count > 0 && " · last line " + elapsed(at,start)}</span>
     </summary>

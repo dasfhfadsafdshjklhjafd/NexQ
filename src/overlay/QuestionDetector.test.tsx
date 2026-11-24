@@ -1,3 +1,5 @@
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+vi.mock("@tauri-apps/api/core", async (original) => ({...await original<typeof import("@tauri-apps/api/core")>(),invoke:vi.fn(async () => undefined)}));
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -537,5 +539,47 @@ describe("Personal sources and automatic answers", () => {
     expect(vi.mocked(runUserAction)).toHaveBeenCalledWith(
       "Assist", "Which database did you pick?", { questionId:"them_old", sources: { notes: true, tools: true } },
     );
+  });
+});
+
+describe("watcher outage in an active meeting", () => {
+  it("answers each question once across busy replies, a permanently bad line and recovery", async () => {
+    vi.useFakeTimers();
+    const before = useConfigStore.getState();
+    const previousDefaults = useAIActionsStore.getState().configs;
+    useConfigStore.setState({llmProvider:"custom",llmModel:"interview",customLlmBaseUrl:"http://127.0.0.1:8000/v1"});
+    setDefaults({questionDetection:true,autoTrigger:true});
+    const old = {...seg("Why partition orders?"), id:"old"};
+    const older = {...seg("How do joins work?"), id:"older", timestamp_ms:0};
+    const bad = {...seg("How would you index sales?"),id:"bad",timestamp_ms:300000};
+    const fresh = {...seg("Why sort invoices?"),id:"fresh",timestamp_ms:302000};
+    useTranscriptStore.setState({segments:[older,old]});
+    let busyReplies = 2;
+    const invoke = vi.mocked(tauriInvoke);
+    invoke.mockImplementation(async (_name,args) => {
+      const payload = (args as {payload:{lines:{text:string}[]}|null}).payload;
+      if (!payload) return {version:1};
+      if (payload.lines.some(line => line.text === bad.text)) {
+        if (busyReplies > 0) {busyReplies--; throw Error("Transcript watcher HTTP 409");}
+        throw Error("Transcript watcher HTTP 502");
+      }
+      return {questions:payload.lines.map((line,i) => ({line:i,text:line.text,sameAs:null}))};
+    });
+    const advance = async (ms:number) => { await act(async () => {await vi.advanceTimersByTimeAsync(ms);}); await settle(); };
+    const view = render(<QuestionDetector/>);
+    try {
+      await advance(250);
+      await advance(250);
+      expect(askedFor()).toEqual([older.text,old.text]);
+      act(() => useTranscriptStore.setState({segments:[older,old,bad,fresh]}));
+      for (let i=0;i<18;i++) await advance(1000);
+      expect(askedFor()).toEqual([older.text,old.text,bad.text,fresh.text]);
+      expect(useQuestionStore.getState().questions).toHaveLength(4);
+      expect(screen.getByText(/4\/4 final lines checked/)).toBeTruthy();
+      expect(screen.getByText(/AI watcher/)).toBeTruthy();
+    } finally {
+      view.unmount(); invoke.mockReset(); useConfigStore.setState(before);
+      useTranscriptStore.getState().clearSegments(); useAIActionsStore.setState({configs:previousDefaults});
+    }
   });
 });
