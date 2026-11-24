@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe,expect,it,vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { scanBatch,useMeetingWatch, stableScanPrefix } from "./useMeetingWatch";
+import { currentScanPrefix,scanBatch,useMeetingWatch, stableScanPrefix } from "./useMeetingWatch";
 import { useTranscriptStore } from "../stores/transcriptStore";
 import { useConfigStore } from "../stores/configStore";
 import { useQuestionStore } from "../stores/questionStore";
@@ -117,4 +117,12 @@ it("waits for a stable statement boundary and then releases an imperative to the
   expect(stableScanPrefix("Tell me about sales.", "Tell me about support.")).toBe("");
   expect(stableScanPrefix("Tell me about support.", "Tell me about support. ")).toBe("");
   expect(stableScanPrefix("Tell me about support.", "Tell me about support. For example")).toBe("Tell me about support.");
+});
+
+it("retains a completed question across capitalization updates without accepting changed words", () => {
+  expect(currentScanPrefix("Why work for US. Next up", "Why work for us.")).toBe("Why work for US.");
+  expect(currentScanPrefix("Why wait for us. Next up", "Why work for us.")).toBeUndefined();
+  expect(currentScanPrefix("Why work", "Why work for us.")).toBeUndefined();
+  const text = "Why work for US. Next question.";
+  expect(scanBatch([line("a",text)],new Map([["a","Why work for us."]])).batch[0].text).toBe(" Next question.");
 });

@@ -11,6 +11,14 @@ type Found = {line:number; text:string; sameAs:number|null};
 export type ScanMode = "local" | "connecting" | "watching" | "retrying" | "fallback";
 const speaker = (line: {speaker:string}) => /^(you|user)$/i.test(line.speaker) ? "You" : "Them";
 
+// STT can change capitalization while a scan is in flight. Accept the
+// submitted words only while the latest transcript still contains them.
+export function currentScanPrefix(current:string|undefined, submitted:string):string|undefined {
+  if (!current || current.length < submitted.length) return;
+  const prefix = current.slice(0,submitted.length);
+  if (prefix === submitted || prefix.toLowerCase() === submitted.toLowerCase()) return prefix;
+}
+
 export function scanBatch(lines: Line[], checked: Map<string,string>) {
   const batch: {line:Line; text:string; prefix:string}[] = [];
   let context = "";
@@ -22,7 +30,7 @@ export function scanBatch(lines: Line[], checked: Map<string,string>) {
       continue;
     }
     let start = 0;
-    while (start < prior.length && prior[start] === line.text[start]) start++;
+    while (start < prior.length && start < line.text.length && prior[start].toLowerCase() === line.text[start].toLowerCase()) start++;
     const end = Math.min(start + 3500,line.text.length);
     if (start && batch.length) break;
     if (start) context = (context + "\n" + speaker(line) + ": " + line.text.slice(Math.max(0,start-1200),start)).slice(-3000);
@@ -160,8 +168,8 @@ export function useMeetingWatch(on: boolean) {
             fallback = true;
           }
         }
-        const current = new Map(eligible().map(s => [s.id,s]));
-        const valid = batch.map(b => current.get(b.line.id)?.text.startsWith(b.prefix));
+        const current = new Map(useTranscriptStore.getState().segments.map(s => [s.id, s.pending_text || s.text]));
+        const valid = batch.map(b => currentScanPrefix(current.get(b.line.id),b.prefix));
         if (fallback) {
           batch.forEach((b,i) => {
             if (!valid[i]) return;
@@ -187,7 +195,7 @@ export function useMeetingWatch(on: boolean) {
             store.addWatchedQuestion({text:q.text,source:line.speaker,timestamp_ms:line.timestamp_ms,confidence:1});
           }
         }
-        batch.forEach((b,i) => {if (valid[i]) checked.set(b.line.id,b.prefix);});
+        batch.forEach((b,i) => {const prefix = valid[i]; if (prefix) checked.set(b.line.id,prefix);});
         failures = 0;
         setMode(fallback ? "fallback" : "watching");
         updateProgress();
