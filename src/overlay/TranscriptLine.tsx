@@ -295,7 +295,8 @@ export function TranscriptLine({ segment, searchQuery }: TranscriptLineProps) {
       {/* Text content + translation + bookmark note */}
       <div className="flex-1 min-w-0 relative">
         <span
-          className={`leading-[1.65] ${
+          data-transcript-text data-speaker={segment.speaker} data-time={segment.timestamp_ms}
+          className={`select-text leading-[1.65] ${
             segment.is_final
               ? "text-foreground"
               : "text-foreground/45 italic"

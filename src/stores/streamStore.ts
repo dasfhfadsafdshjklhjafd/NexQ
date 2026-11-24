@@ -1,3 +1,4 @@
+import { useQuestionStore } from "./questionStore";
 import { create } from "zustand";
 import type { AIResponse, IntelligenceMode, SourceActivity, SourceChip, SourceToggles, StreamSource } from "../lib/types";
 import { dedupeChips } from "../lib/sourceChips";
@@ -294,6 +295,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     // stopped and asked to drop.
     const dropped = state.streamRequestId !== null && discarded.delete(state.streamRequestId);
     const keep = !dropped && content.trim().length > 0;
+    useQuestionStore.getState().finishTracked(state.streamRequestId, keep ? content : "");
 
     set((s) => ({
       isStreaming: false,
@@ -305,7 +307,10 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     }));
   },
 
-  setError: (error) => set({ error, isStreaming: false, ...IDLE_PROGRESS }),
+  setError: (error) => {
+    useQuestionStore.getState().finishTracked(get().streamRequestId, "");
+    set({ error, isStreaming: false, ...IDLE_PROGRESS });
+  },
   clearCurrent: () =>
     set({
       currentContent: "",

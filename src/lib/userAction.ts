@@ -4,6 +4,7 @@
 // Background generations (summary, action items, bookmarks) call
 // generateAssist directly and never carry a scope.
 
+import { useQuestionStore } from "../stores/questionStore";
 import { generateAssist } from "./ipc";
 import { resolveScope, DEFAULT_CONTEXT_SCOPE } from "./contextScope";
 import { getModeLabel } from "./utils";
@@ -52,6 +53,9 @@ export async function runUserAction(
     config.setContextScope({ ...setting, kind: "default" });
   }
 
+  if (customQuestion && (mode === "Assist" || mode === "AskQuestion")) {
+    useQuestionStore.getState().beginTracked(customQuestion, requestId);
+  }
   try {
     await generateAssist(mode, customQuestion, {
       requestId,
@@ -60,6 +64,7 @@ export async function runUserAction(
       ...(opts.sources ? { sources: opts.sources } : {}),
     });
   } catch (err) {
+    useQuestionStore.getState().finishTracked(requestId, "");
     const store = useStreamStore.getState();
     store.clearPending(requestId);
     // The request failed after its stream started, and the backend's error event

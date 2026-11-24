@@ -24,6 +24,7 @@ jobs:
           $dest = New-Item -ItemType Directory -Path NexQ-Hands-Free
           Copy-Item -LiteralPath src-tauri/target/release/nexq.exe -Destination $dest
           Copy-Item -Path src-tauri/ort/*.dll -Destination $dest
+          Copy-Item -LiteralPath LICENSE -Destination $dest
           if (!(Test-Path -LiteralPath (Join-Path $dest 'onnxruntime.dll'))) { throw 'Missing speech runtime' }
       - uses: actions/upload-artifact@v6
         with:

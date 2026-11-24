@@ -7,6 +7,28 @@ use crate::llm::{create_provider, LLMRouter, ProviderConfig, ProviderType};
 use crate::llm::openrouter_models;
 use crate::state::AppState;
 
+/// Independent watcher for the loopback interview proxy. It can run while Assist streams.
+#[command]
+pub async fn scan_interview_transcript(base_url: String, payload: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    let mut url = reqwest::Url::parse(&base_url).map_err(|_| "Invalid proxy URL")?;
+    if url.scheme() != "http" || !matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
+        || url.path().trim_end_matches('/') != "/v1" || !url.username().is_empty() || url.password().is_some()
+        || url.query().is_some() || url.fragment().is_some() {
+        return Err("Transcript watcher requires the local interview proxy".into());
+    }
+    url.set_path("/v1/interview/scan");
+    let client = reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(65)).build().map_err(|e| e.to_string())?;
+    let request = match payload {
+        Some(value) => client.post(url).json(&value),
+        None => client.get(url),
+    };
+    let response = request.send().await.map_err(|_| "Transcript watcher unavailable")?;
+    if !response.status().is_success() { return Err(format!("Transcript watcher HTTP {}", response.status().as_u16())); }
+    response.json().await.map_err(|_| "Invalid transcript watcher response".into())
+}
+
+
 /// Resolve the provider for a read-only operation (model listing, connection test).
 ///
 /// A JSON `ProviderConfig` builds a temporary provider and never touches the

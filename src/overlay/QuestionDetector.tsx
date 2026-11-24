@@ -6,6 +6,8 @@ import {
   REFUSED, answerRunning, autoAnswerRunning, decideTurnStep, inTurn, logAutoAnswer, runYourAction, sameQuestion,
   stopAutoAnswer,
 } from "../lib/autoAnswer";
+import { useMeetingWatch } from "../hooks/useMeetingWatch";
+import { QuestionHistory } from "./QuestionHistory";
 import { useStreamStore } from "../stores/streamStore";
 import { useTranscriptStore } from "../stores/transcriptStore";
 import { useAIActionsStore } from "../stores/aiActionsStore";
@@ -118,9 +120,11 @@ function startAutoAnswer(question: DetectedQuestion, segmentId: string | undefin
   }
   if (segmentId !== undefined) store.answerLine(question, segmentId);
   const requestId = crypto.randomUUID();
+  store.beginTracked(question.text,requestId,segmentId);
   const done = runUserAction("Assist", question.text, { requestId }).catch((err) => {
     // Keep failed questions available to retry.
     const now = useQuestionStore.getState();
+    now.finishTracked(requestId,"");
     now.holdBack(segmentId, question.text);
     if (now.autoAnswer?.requestId === requestId) now.setAutoAnswer(null);
     logAutoAnswer("held");
@@ -174,21 +178,24 @@ export function QuestionDetector() {
   const justMountedRef = useRef(true);
   const segments = useTranscriptStore((s) => s.segments);
   const autoTrigger = useAIActionsStore((s) => s.configs.globalDefaults.autoTrigger);
+  const watch = useMeetingWatch(autoTrigger);
+  const local = watch.mode === "local";
   const busy = useStreamStore((s) => s.isStreaming || s.phase === "sending");
 
   useEffect(() => {
+    if (!local) return;
     const p = onQuestionDetected((event) => {
       if (isOtherParty(event.source)) {
         addQuestion(event);
       }
     });
     return () => { p.then((u) => u()); };
-  }, [addQuestion]);
+  }, [addQuestion,local]);
 
   // Providers that detect turns (Cartesia, Deepgram Flux): answer on their
   // "done", or early on "probably done", instead of waiting for quiet.
   useEffect(() => {
-    if (!autoTrigger) return;
+    if (!autoTrigger || !local) return;
     const onLine = ({ segment }: TranscriptUpdateEvent) => {
       if (!segment.turn || !isOtherParty(segment.speaker)) return;
       useQuestionStore.getState().markTurnLine(segment.id);
@@ -201,14 +208,22 @@ export function QuestionDetector() {
       updates.then((u) => u());
       finals.then((u) => u());
     };
-  }, [autoTrigger]);
+  }, [autoTrigger,local]);
 
   useEffect(() => {
     const store = useQuestionStore.getState();
+    if (!local) return;
     const { checkLine, panelSeen, setPanelSeen, holdBackUnanswered } = store;
     for (const seg of segments) {
       if (!seg.is_final || !checkLine(seg.id, seg.text)) continue;
-      if (!isOtherParty(seg.speaker)) continue;
+      if (!isOtherParty(seg.speaker)) {
+        if (/^(you|user)$/i.test(seg.speaker)) {
+          for (const q of lineQuestions(seg.text)) store.addLineQuestion({
+            text:q.text,confidence:0.8,timestamp_ms:seg.timestamp_ms,source:seg.speaker
+          },seg.id + "#" + q.offset);
+        }
+        continue;
+      }
       if (seg.turn || store.isTurnLine(seg.id)) {
         const sentence = lastSentence(seg.text);
         if (sentence && looksLikeQuestion(sentence)) addQuestion({ text: sentence, confidence: 0.8, timestamp_ms: seg.timestamp_ms, source: seg.speaker }, seg.id);
@@ -235,7 +250,7 @@ export function QuestionDetector() {
     if (justMountedRef.current && panelSeen) holdBackUnanswered();
     justMountedRef.current = false;
     setPanelSeen();
-  }, [segments, addQuestion, autoTrigger]);
+  }, [segments, addQuestion, autoTrigger,local]);
 
   const handleAssist = useCallback((index: number) => {
     const question = questions[index];
@@ -256,12 +271,13 @@ export function QuestionDetector() {
     useQuestionStore.getState().dismiss(index);
   }, []);
 
-  const latest = questions.length > 0 ? questions[0] : null;
-  const previousQuestions = questions.slice(1, 4);
+  const visible = questions.filter(q => !q.dismissed && isOtherParty(q.source));
+  const latest = visible[0] || null;
+  const previousQuestions = visible.slice(1, 4);
 
   // Settle the question itself. Unrelated narration must not postpone it.
   // Oldest first, so a second question arriving during generation waits its turn.
-  const pending = questions.slice().reverse().find(q => !q.assisted && !q.heldBack
+  const pending = questions.slice().reverse().find(q => (isOtherParty(q.source) || q.manual) && !q.dismissed && !q.assisted && !q.heldBack
     && !useQuestionStore.getState().isTurnLine(q.segmentId));
   const revising = pending && segments.some(seg => !seg.is_final && pending.segmentId?.startsWith(seg.id + "#")
     && !seg.text.includes(pending.text));
@@ -282,13 +298,14 @@ export function QuestionDetector() {
 
   return (
     <div className="flex flex-col gap-2.5" role="region" aria-label="Detected questions">
+      <QuestionHistory mode={watch.mode} progress={watch.progress} onRetry={handleAssist} />
       {/* Latest question — prominent card */}
       <div
         className={`group flex items-start gap-3 rounded-lg transition-all duration-200 ${
           latest ? "cursor-pointer hover:bg-info/10 question-card-enter" : ""
         }`}
-        onClick={() => latest && handleAssist(0)}
-        onKeyDown={(e) => { if (latest && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); handleAssist(0); } }}
+        onClick={() => latest && handleAssist(questions.indexOf(latest))}
+        onKeyDown={(e) => { if (latest && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); handleAssist(questions.indexOf(latest)); } }}
         role={latest ? "button" : undefined}
         tabIndex={latest ? 0 : undefined}
         aria-label={latest ? `Question: ${latest.text}. ${latest.assisted ? "Answered" : "Click to assist"}` : undefined}
@@ -320,7 +337,7 @@ export function QuestionDetector() {
         {latest && (
           <div className="flex shrink-0 items-center gap-1">
             <button
-              onClick={(e) => { e.stopPropagation(); handleAssist(0); }}
+              onClick={(e) => { e.stopPropagation(); handleAssist(questions.indexOf(latest)); }}
               aria-label={latest.assisted ? "Already answered" : "Get AI assistance for this question"}
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-150 cursor-pointer ${
                 latest.assisted
@@ -335,7 +352,7 @@ export function QuestionDetector() {
               )}
             </button>
             <button
-              onClick={(e) => handleDismiss(0, e)}
+              onClick={(e) => handleDismiss(questions.indexOf(latest), e)}
               aria-label="Dismiss question"
               className="rounded-lg p-1.5 text-muted-foreground/30 opacity-0 transition-all duration-150 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 cursor-pointer"
             >
@@ -348,8 +365,8 @@ export function QuestionDetector() {
       {/* Previous questions — compact list */}
       {previousQuestions.length > 0 && (
         <div className="flex flex-col gap-1">
-          {previousQuestions.map((q, idx) => {
-            const realIdx = idx + 1;
+          {previousQuestions.map((q) => {
+            const realIdx = questions.indexOf(q);
             return (
               <div
                 key={`q-${realIdx}-${q.timestamp_ms}`}

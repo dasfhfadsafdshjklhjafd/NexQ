@@ -1,11 +1,15 @@
 // Sub-PRD 4: Rolling live transcript with auto-scroll and search
 // Displays transcript segments with auto-scroll behavior and search/filter.
 
-import { useEffect, useRef, useCallback, useMemo } from "react";
+import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { useTranscriptStore } from "../stores/transcriptStore";
 import { useMeetingStore } from "../stores/meetingStore";
 import { useAudioLevel } from "../hooks/useAudioLevel";
 import { useConfigStore } from "../stores/configStore";
+import { useQuestionStore } from "../stores/questionStore";
+import { useAIActionsStore } from "../stores/aiActionsStore";
+import { runYourAction } from "../lib/autoAnswer";
+import { showToast } from "../stores/toastStore";
 import { TranscriptLine } from "./TranscriptLine";
 import { SpeakerNamingBanner } from "./SpeakerNamingBanner";
 import { NoTranscriptBanner } from "./NoTranscriptBanner";
@@ -139,6 +143,46 @@ export function TranscriptPanel({ onOpenDevLog }: { onOpenDevLog?: () => void } 
     ? filteredSegments.length
     : 0;
 
+  const [selection,setSelection] = useState<{text:string; source:"Them"|"User"; timestamp_ms:number} | null>(null);
+  useEffect(() => {
+    const read = () => {
+      const sel = window.getSelection();
+      const container = scrollRef.current;
+      if (!container || !sel?.rangeCount || sel.isCollapsed || !container.contains(sel.anchorNode) || !container.contains(sel.focusNode)) {
+        setSelection(null); return;
+      }
+      const range = sel.getRangeAt(0);
+      const parts: string[] = [];
+      let first: HTMLElement | undefined;
+      for (const span of container.querySelectorAll<HTMLElement>("[data-transcript-text]")) {
+        if (!range.intersectsNode(span)) continue;
+        const piece = document.createRange();
+        piece.selectNodeContents(span);
+        if (span.contains(range.startContainer)) piece.setStart(range.startContainer,range.startOffset);
+        if (span.contains(range.endContainer)) piece.setEnd(range.endContainer,range.endOffset);
+        const words = piece.toString().trim();
+        if (words) {first ??= span; parts.push(words);}
+      }
+      setSelection(first ? {text:parts.join("\n"),source:/^(you|user)$/i.test(first.dataset.speaker || "") ? "User" : "Them",timestamp_ms:Number(first.dataset.time)} : null);
+    };
+    document.addEventListener("selectionchange",read);
+    return () => document.removeEventListener("selectionchange",read);
+  },[]);
+  const askSelection = () => {
+    if (!selection) return;
+    const {autoTrigger,questionDetection} = useAIActionsStore.getState().configs.globalDefaults;
+    const store = useQuestionStore.getState();
+    store.queueSelection({...selection,confidence:1});
+    if (!(autoTrigger && questionDetection)) {
+      void runYourAction("AskQuestion",selection.text).catch(() => {
+        store.holdBack(undefined,selection.text);
+        showToast("Could not answer the selection","error");
+      });
+    }
+    window.getSelection()?.removeAllRanges();
+    setSelection(null);
+  };
+
   // Empty state
   if (segments.length === 0) {
     return (
@@ -241,6 +285,7 @@ export function TranscriptPanel({ onOpenDevLog }: { onOpenDevLog?: () => void } 
         )}
       </div>
 
+      {selection && <button className="mx-1 mb-1 self-start rounded bg-accent px-2 py-1 text-xs" onMouseDown={e => e.preventDefault()} onClick={askSelection}>Answer selection</button>}
       {/* Transcript lines — relative+absolute breaks out of flex min-height */}
       <div className="relative flex-1 min-h-0">
       <div
