@@ -238,6 +238,7 @@ export interface StreamSource {
 }
 
 export interface AIResponse {
+  question?: string;
   id: string;
   content: string;
   mode: IntelligenceMode;

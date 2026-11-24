@@ -41,6 +41,7 @@ interface StreamState {
   currentContent: string;
   _rawContent: string; // unfiltered content (includes <think> tags)
   currentMode: IntelligenceMode | null;
+  currentQuestion: string | null;
   currentModel: string;
   currentProvider: string;
   currentSources: StreamSource[];
@@ -80,7 +81,7 @@ interface StreamState {
   setStreaming: (streaming: boolean) => void;
   appendToken: (token: string) => void;
   /** A user action was invoked: show "Sending…" until its start event. No-op while streaming. */
-  setPending: (mode: IntelligenceMode | string, requestId: string, sources?: SourceToggles) => void;
+  setPending: (mode: IntelligenceMode | string, requestId: string, sources?: SourceToggles, question?: string) => void;
   /** The pending action failed before starting (only clears that request). */
   clearPending: (requestId: string) => void;
   /** Whether `requestId` is the request being sent or streamed now. */
@@ -106,6 +107,7 @@ interface StreamState {
 }
 
 const IDLE_PROGRESS = {
+  currentQuestion: null,
   phase: "idle" as StreamPhase,
   requestStartedAt: null,
   firstTokenAt: null,
@@ -174,13 +176,14 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       return { _rawContent: raw, currentContent: content, ...progress };
     }),
 
-  setPending: (mode, requestId, sources) => {
+  setPending: (mode, requestId, sources, question) => {
     // A second press while one is running or still sending is refused by the
     // backend; it must not take over the first request's progress.
     if (get().isStreaming || get().phase === "sending") return;
     set({
       phase: "sending",
       pendingRequestId: requestId,
+      currentQuestion: question?.trim() || null,
       requestSources: sources ?? null,
       requestStartedAt: Date.now(),
       firstTokenAt: null,
@@ -238,6 +241,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       firstTokenAt: null,
       pendingRequestId: null,
       streamRequestId: details.requestId ?? null,
+      currentQuestion: fromClick ? state.currentQuestion : null,
       currentId: null,
       streamMeta: {
         model,
@@ -277,6 +281,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     const started = state.requestStartedAt;
     const response: AIResponse = {
       id: crypto.randomUUID(),
+      question: state.currentQuestion ?? undefined,
       content,
       mode: state.currentMode!,
       timestamp: now,

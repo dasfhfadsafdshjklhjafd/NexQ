@@ -19,15 +19,20 @@ import { useConfigStore } from "../stores/configStore";
 import { ColorPickerButton } from "../components/ColorPickerButton";
 import { ResponseProgress } from "./ResponseProgress";
 import { ResponseHistoryList } from "./ResponseHistoryList";
-import { formatDuration } from "./responseFormat";
+import { formatDuration, previewLine, questionTabTitle } from "./responseFormat";
 import { SourceChips } from "../sources/SourceChips";
 import { SourceActivityLines, SourceNotices } from "../sources/SourceActivityLines";
 
-/** "current", "resp-<id>" (a history answer) or "pinned-<id>". */
-type TabId = "current" | `resp-${string}` | `pinned-${string}`;
+/** A saved answer keeps the same tab identity when pinned. */
+type TabId = "current" | `resp-${string}`;
 
 /** Answers shown as tabs next to "Current"; the rest are in History. */
 const PREVIOUS_TABS = 4;
+
+function tabTitle(response: AIResponse): string {
+  if (response.question) return questionTabTitle(response.question);
+  return (response.mode === "Assist" && previewLine(response.content)) || getModeLabel(response.mode);
+}
 
 // Sub-PRD 6: Streaming markdown, response history tabs, pin/copy
 export function AIResponsePanel() {
@@ -35,6 +40,7 @@ export function AIResponsePanel() {
   const phase = useStreamStore((s) => s.phase);
   const currentContent = useStreamStore((s) => s.currentContent);
   const currentMode = useStreamStore((s) => s.currentMode);
+  const pendingQuestion = useStreamStore((s) => s.currentQuestion);
   const currentId = useStreamStore((s) => s.currentId);
   const error = useStreamStore((s) => s.error);
   const currentSources = useStreamStore((s) => s.currentSources);
@@ -123,7 +129,9 @@ export function AIResponsePanel() {
     () => responseHistory.filter((r) => r.id !== currentId).slice(0, PREVIOUS_TABS),
     [responseHistory, currentId]
   );
+  const olderPins = pinnedResponses.filter(r => r.id !== currentId && !previousResponses.some(previous => previous.id === r.id));
   const currentResponse = currentId ? responseHistory.find((r) => r.id === currentId) ?? null : null;
+  const currentQuestion = pendingQuestion || currentResponse?.question;
   const hasTabs = previousResponses.length > 0 || pinnedResponses.length > 0;
 
   const closeHistory = useCallback(() => {
@@ -143,7 +151,7 @@ export function AIResponsePanel() {
   // The answer a history / pinned tab shows (by id, so new answers never shift it)
   let displayResponse: AIResponse | null = null;
   if (activeTab !== "current") {
-    const id = activeTab.replace(/^(resp|pinned)-/, "");
+    const id = activeTab.slice("resp-".length);
     displayResponse =
       responseHistory.find((r) => r.id === id) ?? pinnedResponses.find((r) => r.id === id) ?? null;
   }
@@ -151,7 +159,7 @@ export function AIResponsePanel() {
   const selectedId = activeTab === "current" ? currentId : displayResponse?.id ?? null;
   // An answer opened from History that has no tab of its own.
   const openedFromHistory =
-    activeTab.startsWith("resp-") && !previousResponses.some((r) => `resp-${r.id}` === activeTab);
+    activeTab.startsWith("resp-") && !previousResponses.some((r) => `resp-${r.id}` === activeTab) && !olderPins.some(r => `resp-${r.id}` === activeTab);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -160,25 +168,31 @@ export function AIResponsePanel() {
         <div className="mb-2 flex shrink-0 items-center gap-1.5 pb-1.5">
           <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto" role="tablist" aria-label="AI response tabs">
             <TabButton
-              label="Current"
+              label={currentQuestion ? questionTabTitle(currentQuestion) : "Current"}
+              description={currentQuestion ? `Latest answer · ${currentQuestion}` : "Latest answer"}
+              latest={!!currentQuestion}
+              pinned={currentId !== null && pinnedIds.has(currentId)}
               active={activeTab === "current"}
               onClick={() => setActiveTab("current")}
             />
             {previousResponses.map((resp) => (
               <TabButton
                 key={resp.id}
-                label={getModeLabel(resp.mode)}
+                label={tabTitle(resp)}
+                description={resp.question || tabTitle(resp)}
                 active={activeTab === `resp-${resp.id}`}
                 onClick={() => setActiveTab(`resp-${resp.id}`)}
                 secondary
+                pinned={pinnedIds.has(resp.id)}
               />
             ))}
-            {pinnedResponses.map((resp) => (
+            {olderPins.map((resp) => (
               <TabButton
                 key={resp.id}
-                label={`${getModeLabel(resp.mode)}`}
-                active={activeTab === `pinned-${resp.id}`}
-                onClick={() => setActiveTab(`pinned-${resp.id}`)}
+                label={tabTitle(resp)}
+                description={resp.question || tabTitle(resp)}
+                active={activeTab === `resp-${resp.id}`}
+                onClick={() => setActiveTab(`resp-${resp.id}`)}
                 pinned
               />
             ))}
@@ -390,8 +404,8 @@ function AnswerHeader({
   return (
     <div className="flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-0.5 text-meta font-medium text-primary/80">
-          {getModeLabel(mode)}
+        <span title={response?.question} className="min-w-0 truncate rounded-full bg-primary/10 px-2.5 py-0.5 text-meta font-medium text-primary/80">
+          {response?.question || getModeLabel(mode)}
         </span>
         {(timing || response?.scope_label) && (
           <span className="min-w-0 truncate text-meta tabular-nums text-muted-foreground/45">
@@ -420,12 +434,16 @@ function AnswerHeader({
 
 function TabButton({
   label,
+  description,
+  latest,
   active,
   onClick,
   secondary,
   pinned,
 }: {
   label: string;
+  description: string;
+  latest?: boolean;
   active: boolean;
   onClick: () => void;
   secondary?: boolean;
@@ -435,8 +453,10 @@ function TabButton({
     <button
       onClick={onClick}
       role="tab"
+      title={description}
+      aria-label={description}
       aria-selected={active}
-      className={`shrink-0 rounded-full px-2.5 py-0.5 text-meta font-medium transition-colors duration-150 ${
+      className={`inline-flex max-w-[10rem] shrink-0 items-center gap-1 rounded-full px-2.5 py-0.5 text-meta font-medium transition-colors duration-150 ${
         active
           ? "bg-primary/20 text-primary"
           : secondary
@@ -447,7 +467,8 @@ function TabButton({
       }`}
     >
       {pinned && <Pin className="mr-0.5 inline-block h-2.5 w-2.5" aria-hidden="true" />}
-      {label}
+      {latest && <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
+      <span className="truncate">{label}</span>
     </button>
   );
 }

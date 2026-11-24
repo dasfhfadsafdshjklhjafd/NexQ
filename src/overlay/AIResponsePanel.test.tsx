@@ -18,10 +18,10 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
 const T0 = 1_700_000_000_000;
 const s = () => useStreamStore.getState();
 
-function answer(mode: string, text: string) {
+function answer(mode: string, text: string, question?: string) {
   act(() => {
     const id = crypto.randomUUID();
-    s().setPending(mode, id);
+    s().setPending(mode, id, undefined, question);
     s().startStream(mode as never, "haiku", "Claude CLI", { requestId: id });
     s().appendToken(text);
     s().endStream(5);
@@ -48,8 +48,32 @@ describe("AIResponsePanel", () => {
     render(<AIResponsePanel />);
     answer("Assist", "first");
     answer("Shorten", "second");
-    expect(tabs()).toEqual(["Current", "Assist"]);
+    expect(tabs()).toEqual(["Current", "first"]);
     expect(screen.getByText("second")).toBeInTheDocument();
+  });
+
+  it("keeps each tab linked to its own question while streaming, in history and when pinned", () => {
+    render(<AIResponsePanel />);
+    const first = "What are your strengths?";
+    const next = "How would you handle late events?";
+    answer("AskQuestion", "Clear communication.", first);
+    act(() => s().setPending("Assist", "new", undefined, next));
+    expect(tabs()).toEqual(["Handle late events", "Your strengths"]);
+    act(() => {
+      s().setPending("Assist", "refused", undefined, "Unrelated?");
+      s().startStream("Assist", "m", "p", { requestId: "new" });
+      s().appendToken("Use event time.");
+      s().endStream(10);
+    });
+    fireEvent.click(screen.getByRole("tab", { name: first }));
+    expect(screen.getByText("Clear communication.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Pin response" }));
+    expect(s().pinnedResponses[0].question).toBe(first);
+    expect(tabs()).toEqual(["Handle late events", "Your strengths"]);
+    fireEvent.click(screen.getByRole("button", { name: "History, 2 answers" }));
+    const history = within(screen.getByRole("dialog", { name: "All answers" }));
+    expect(history.getByText(first)).toBeVisible();
+    expect(history.getByText(next)).toBeVisible();
   });
 
   it("shows Current + the 4 previous answers; History lists them all and opens any", () => {

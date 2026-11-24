@@ -99,7 +99,7 @@ export function ResponseHistoryList({
               >
                 <span className="flex items-center gap-2">
                   <span className={`text-meta font-semibold ${selected ? "text-primary" : "text-foreground/80"}`}>
-                    {getModeLabel(r.mode)}
+                    {r.question || getModeLabel(r.mode)}
                   </span>
                   {pinnedIds.has(r.id) && <Pin className="h-2.5 w-2.5 text-warning/70" aria-label="Pinned" />}
                   <span className="ml-auto shrink-0 font-mono text-meta tabular-nums text-muted-foreground/50">

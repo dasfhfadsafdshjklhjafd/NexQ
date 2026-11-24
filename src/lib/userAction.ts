@@ -47,7 +47,8 @@ export async function runUserAction(
   // Another action is already on its way: the backend will refuse this one.
   const busy = stream.isStreaming || stream.phase === "sending";
 
-  stream.setPending(mode, requestId, opts.sources);
+  const question = mode === "Assist" || mode === "AskQuestion" ? customQuestion : undefined;
+  stream.setPending(mode, requestId, opts.sources, question);
   // A one-off scope is used up by this action (not by a click the running
   // stream will refuse).
   if (!config.contextScopeSticky && setting.kind !== "default" && !busy) {

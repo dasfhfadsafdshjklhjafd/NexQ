@@ -23,6 +23,16 @@ export function previewLine(content: string): string {
   return line.replace(/^(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)/, "").replace(/[*_`]/g, "");
 }
 
+/** Keep the subject of a spoken question near the front of a narrow tab. */
+export function questionTabTitle(question: string): string {
+  const text = question.trim().replace(/\s+/g, " ");
+  const short = text.replace(/[?.!]+$/, "")
+    .replace(/^what (?:is|are) (your\b)/i, "$1")
+    .replace(/^how (?:would|do|did) you (?=\S)/i, "")
+    .replace(/^tell (?:me|us) about (?!yourself\b)(?=\S)/i, "");
+  return short ? short.charAt(0).toUpperCase() + short.slice(1) : text;
+}
+
 /** "3 new transcript lines sent" / "no new transcript since last answer" (session path), "42 transcript lines" (stateless). */
 export function linesLabel(newLines: number | null, sessionKey: string | null): string | null {
   if (newLines == null) return null;
