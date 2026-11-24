@@ -85,7 +85,7 @@ export function QuestionPanel() {
   const questionDetection = useAIActionsStore((s) => s.configs.globalDefaults.questionDetection);
   if (!questionDetection) return null;
   return (
-    <div className="shrink-0 rounded-xl border border-info/10 bg-info/5 px-4 py-3">
+    <div className="max-h-[42%] shrink-0 overflow-y-auto rounded-xl border border-info/10 bg-info/5 px-3 py-1.5">
       <QuestionDetector />
     </div>
   );
@@ -244,7 +244,7 @@ export function QuestionDetector() {
 
         <div className="flex-1 min-w-0">
           {latest ? (
-            <p className="text-sm leading-relaxed font-medium text-foreground/90">
+            <p className="line-clamp-2 text-sm leading-snug font-medium text-foreground/90" title={latest.text}>
               &ldquo;{latest.text}&rdquo;
             </p>
           ) : (
@@ -284,7 +284,7 @@ export function QuestionDetector() {
 
       {/* Previous questions — compact list */}
       {previousQuestions.length > 0 && (
-        <div className="flex flex-col gap-1">
+        <div className="hidden flex-col gap-1 sm:flex">
           {previousQuestions.map((q) => {
             const realIdx = questions.indexOf(q);
             return (

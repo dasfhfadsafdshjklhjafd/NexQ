@@ -338,7 +338,9 @@ export function OverlayView() {
 
       {/* ═══ MAIN ═══ */}
       <div className="relative flex-1 min-h-0">
-      <div className="absolute inset-0 flex flex-wrap gap-2.5 overflow-hidden px-3 py-2.5">
+      <div className={`absolute inset-0 gap-2.5 overflow-hidden px-3 py-2.5 ${layoutMode === "split"
+        ? "grid grid-rows-[minmax(0,1fr)_minmax(0,2fr)] sm:grid-rows-1 sm:grid-cols-2"
+        : "flex"}`}>
 
         {/* ── LEFT: TRANSCRIPT ── */}
         {layoutMode !== "ai" ? (
