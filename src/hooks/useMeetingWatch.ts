@@ -33,15 +33,19 @@ export function scanBatch(lines: Line[], checked: Map<string,string>) {
   return {batch,context};
 }
 
-// Keep only question text that survives two different hypotheses with its
-// question mark intact. The recognizer still owns the final transcript.
-function stableThroughQuestion(previous:string, current:string):string {
-  const complete = /[^.!?。？！\n]+[?？]/gu;
-  const normalize = (s:string) => s.trim().toLowerCase().replace(/\s+/g," ");
-  const previousQuestions = new Set(Array.from(previous.matchAll(complete), m => normalize(m[0])));
+// Parakeet often ends a spoken request with a period. Advance to a
+// sentence only after the same words and punctuation survive a new decode.
+// For a period or exclamation, also wait for the speaker to start the next
+// phrase: a trailing period on the latest hypothesis may still move.
+export function stableScanPrefix(previous:string, current:string):string {
+  const complete = /[^.!?。？！\\n]+[.!?。？！]/gu;
+  const normalize = (s:string) => s.trim().toLowerCase().replace(/\\s+/g," ");
+  const previousSentences = new Set(Array.from(previous.matchAll(complete), m => normalize(m[0])));
   let end = 0;
   for (const m of current.matchAll(complete)) {
-    if (previousQuestions.has(normalize(m[0]))) end = m.index! + m[0].length;
+    const boundary = m.index! + m[0].length;
+    if (!/[?？]$/u.test(m[0]) && !current.slice(boundary).trim()) continue;
+    if (previousSentences.has(normalize(m[0]))) end = boundary;
   }
   return current.slice(0,end);
 }
@@ -86,7 +90,7 @@ export function useMeetingWatch(on: boolean) {
         liveIds.add(s.id);
         const prior = previews.get(s.id);
         if (prior?.raw === raw) continue;
-        const stable = prior ? stableThroughQuestion(prior.raw,raw) : "";
+        const stable = prior ? stableScanPrefix(prior.raw,raw) : "";
         const kept = prior?.stable && raw.startsWith(prior.stable) ? prior.stable : "";
         previews.set(s.id,{raw,stable:stable.length > kept.length ? stable : kept});
       }

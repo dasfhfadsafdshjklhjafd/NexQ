@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe,expect,it,vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { scanBatch,useMeetingWatch } from "./useMeetingWatch";
+import { scanBatch,useMeetingWatch, stableScanPrefix } from "./useMeetingWatch";
 import { useTranscriptStore } from "../stores/transcriptStore";
 import { useConfigStore } from "../stores/configStore";
 import { useQuestionStore } from "../stores/questionStore";
@@ -106,4 +106,11 @@ describe("meeting watcher",() => {
       useConfigStore.setState(before); useStreamStore.getState().resetForMeeting(); vi.useRealTimers();
     }
   });
+});
+
+
+it("waits for a stable statement boundary and then releases an imperative to the watcher", () => {
+  expect(stableScanPrefix("Tell me about sales.", "Tell me about support.")).toBe("");
+  expect(stableScanPrefix("Tell me about support.", "Tell me about support. ")).toBe("");
+  expect(stableScanPrefix("Tell me about support.", "Tell me about support. For example")).toBe("Tell me about support.");
 });
