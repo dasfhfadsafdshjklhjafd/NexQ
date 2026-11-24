@@ -68,6 +68,7 @@ export function AIResponsePanel() {
   };
 
   const [activeTab, setActiveTab] = useState<TabId>("current");
+  const [showFormat,setShowFormat] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -78,7 +79,7 @@ export function AIResponsePanel() {
 
   // Auto-scroll during streaming
   useEffect(() => {
-    if (isStreaming && scrollRef.current) {
+    if (isStreaming && scrollRef.current && !window.matchMedia?.("(max-width: 639px)")?.matches) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [currentContent, isStreaming]);
@@ -295,7 +296,8 @@ export function AIResponsePanel() {
       </div>
 
       {/* Typeset controls */}
-      <div className="flex shrink-0 flex-col gap-1 border-t border-border/10 px-1 pt-1.5">
+      <button className="shrink-0 self-end text-meta text-muted-foreground sm:hidden" aria-expanded={showFormat} onClick={() => setShowFormat(v => !v)}>Text settings</button>
+      <div className={`${showFormat ? "flex" : "hidden"} sm:flex shrink-0 flex-col gap-1 border-t border-border/10 px-1 pt-1.5`}>
         {/* Row 1: font size + color */}
         <div className="flex items-center gap-3">
           <span className="text-[0.6rem] uppercase tracking-widest text-muted-foreground/40 font-medium">AI Text</span>

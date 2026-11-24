@@ -33,6 +33,19 @@ export function scanBatch(lines: Line[], checked: Map<string,string>) {
   return {batch,context};
 }
 
+// Keep only question text that survives two different hypotheses with its
+// question mark intact. The recognizer still owns the final transcript.
+function stableThroughQuestion(previous:string, current:string):string {
+  const complete = /[^.!?。？！\n]+[?？]/gu;
+  const normalize = (s:string) => s.trim().toLowerCase().replace(/\s+/g," ");
+  const previousQuestions = new Set(Array.from(previous.matchAll(complete), m => normalize(m[0])));
+  let end = 0;
+  for (const m of current.matchAll(complete)) {
+    if (previousQuestions.has(normalize(m[0]))) end = m.index! + m[0].length;
+  }
+  return current.slice(0,end);
+}
+
 // A layout change may unmount the overlay. Keep committed progress for this meeting.
 let checkpoint: {generation:number; url:string; checked:Map<string,string>} | undefined;
 
@@ -54,11 +67,36 @@ export function useMeetingWatch(on: boolean) {
     let probeAfter = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const finals = () => useTranscriptStore.getState().segments.filter(s => s.is_final && s.text.trim());
+    const previews = new Map<string,{raw:string; stable:string}>();
+    function eligible():Line[] {
+      const result:Line[] = [];
+      for (const s of useTranscriptStore.getState().segments) {
+        const stable = previews.get(s.id)?.stable || "";
+        const final = s.is_final ? s.text : "";
+        const text = stable.length > final.length && stable.startsWith(final) ? stable : final;
+        if (text.trim()) result.push({...s,text});
+      }
+      return result;
+    }
+    function updatePreviews(segments:TranscriptSegment[]) {
+      const liveIds = new Set<string>();
+      for (const s of segments) {
+        const raw = s.is_final ? s.pending_text : s.text;
+        if (!raw || speaker(s) !== "Them") continue;
+        liveIds.add(s.id);
+        const prior = previews.get(s.id);
+        if (prior?.raw === raw) continue;
+        const stable = prior ? stableThroughQuestion(prior.raw,raw) : "";
+        const kept = prior?.stable && raw.startsWith(prior.stable) ? prior.stable : "";
+        previews.set(s.id,{raw,stable:stable.length > kept.length ? stable : kept});
+      }
+      for (const id of previews.keys()) if (!liveIds.has(id)) previews.delete(id);
+    }
     const alive = () => !stopped && useQuestionStore.getState().generation === generation;
     function updateProgress() {
       let count = 0, at = 0;
       for (const line of finals()) {
-        if (checked.get(line.id) !== line.text) break;
+        if (!checked.get(line.id)?.startsWith(line.text)) break;
         count++; at = Math.max(at,line.timestamp_ms);
       }
       setProgress(old => old.count === count && old.at === at ? old : {count,at});
@@ -79,7 +117,7 @@ export function useMeetingWatch(on: boolean) {
           if (!alive()) return;
           probeAfter = Date.now() + 30000;
         }
-        const {batch:pending,context} = scanBatch(finals(),checked);
+        const {batch:pending,context} = scanBatch(eligible(),checked);
         for (const b of pending) if (!b.text.trim()) checked.set(b.line.id,b.prefix);
         let batch = pending.filter(b => b.text.trim());
         if (!batch.length) {
@@ -112,7 +150,7 @@ export function useMeetingWatch(on: boolean) {
             fallback = true;
           }
         }
-        const current = new Map(finals().map(s => [s.id,s]));
+        const current = new Map(eligible().map(s => [s.id,s]));
         const valid = batch.map(b => current.get(b.line.id)?.text.startsWith(b.prefix));
         if (fallback) {
           batch.forEach((b,i) => {
@@ -150,10 +188,11 @@ export function useMeetingWatch(on: boolean) {
       }
     }
     setMode("connecting");
+    updatePreviews(useTranscriptStore.getState().segments);
     updateProgress();
     schedule(0);
     const unsub = useTranscriptStore.subscribe((s,old) => {
-      if (s.segments !== old.segments) {updateProgress(); schedule(650);}
+      if (s.segments !== old.segments) {updatePreviews(s.segments); updateProgress(); schedule(250);}
     });
     return () => {stopped = true; clearTimeout(timer); unsub();};
   },[enabled,generation,url]);

@@ -43,6 +43,35 @@ describe("meeting watcher",() => {
     expect(useQuestionStore.getState().questions[0]).toMatchObject({heldBack:true,requestId:undefined,failed:false});
     store.clear();
   });
+  it("scans a question once after two agreeing provisional updates and reconciles its final",async () => {
+    vi.useFakeTimers();
+    const before = useConfigStore.getState();
+    useQuestionStore.getState().clear(); useTranscriptStore.getState().clearSegments();
+    useConfigStore.setState({llmProvider:"custom",llmModel:"interview",customLlmBaseUrl:"http://127.0.0.1:8000/v1"});
+    const scan = vi.mocked(invoke);
+    scan.mockReset().mockResolvedValueOnce({version:1}).mockResolvedValueOnce({questions:[{line:0,text:"How do you index orders?",sameAs:null}]}).mockResolvedValue({questions:[]});
+    const view = renderHook(()=>useMeetingWatch(true));
+    const update = async (text:string,final=false) => {
+      act(()=>useTranscriptStore.setState({segments:[{...line("preview",text),is_final:final}]}));
+      await act(async()=>{await vi.advanceTimersByTimeAsync(900);});
+    };
+    try {
+      await update("How do you index users?");
+      await update("How do you index orders?");
+      expect(useQuestionStore.getState().questions).toHaveLength(0);
+      await update("How do you index orders? Suppose the table grows.");
+      expect(useQuestionStore.getState().questions).toHaveLength(1);
+      expect(view.result.current.progress.count).toBe(0);
+      await update("How do you index orders? Suppose the table grows.",true);
+      expect(view.result.current.progress.count).toBe(1);
+      expect(useQuestionStore.getState().questions).toHaveLength(1);
+      const last = scan.mock.calls[scan.mock.calls.length-1][1] as {payload:{lines:{text:string}[]}};
+      expect(last.payload.lines[0].text).toBe(" Suppose the table grows.");
+    } finally {
+      view.unmount(); scan.mockReset(); useQuestionStore.getState().clear(); useTranscriptStore.getState().clearSegments();
+      useConfigStore.setState(before); vi.useRealTimers();
+    }
+  });
   it("scans during an answer, groups a restatement and retains a distinct follow-up",async () => {
     vi.useFakeTimers();
     const before = useConfigStore.getState();

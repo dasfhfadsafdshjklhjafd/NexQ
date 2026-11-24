@@ -143,6 +143,7 @@ export function TranscriptPanel({ onOpenDevLog }: { onOpenDevLog?: () => void } 
     ? filteredSegments.length
     : 0;
 
+  const [showTools,setShowTools] = useState(false);
   const [selection,setSelection] = useState<{text:string; source:"Them"|"User"; timestamp_ms:number} | null>(null);
   useEffect(() => {
     const read = () => {
@@ -208,7 +209,7 @@ export function TranscriptPanel({ onOpenDevLog }: { onOpenDevLog?: () => void } 
           )}
         </div>
         {isRecording && (
-          <div className="mx-1 mb-1.5 space-y-1">
+          <div className={`${showTools ? "block" : "hidden"} sm:block mx-1 mb-1.5 space-y-1`}>
             {isInPerson ? (
               <AudioActivityBar
                 icon={<Radio className="h-3.5 w-3.5" />}
@@ -307,8 +308,9 @@ export function TranscriptPanel({ onOpenDevLog }: { onOpenDevLog?: () => void } 
       </div>
       </div>
 
+      <button className="shrink-0 self-end text-meta text-muted-foreground sm:hidden" aria-expanded={showTools} onClick={() => setShowTools(v => !v)}>Transcript controls</button>
       {/* Typeset controls */}
-      <div className="flex items-center gap-2 mx-1 mb-1 px-2.5 py-1 border-t border-border/10">
+      <div className={`${showTools ? "flex" : "hidden"} sm:flex items-center gap-2 mx-1 mb-1 px-2.5 py-1 border-t border-border/10`}>
         <span className="text-[0.6rem] uppercase tracking-widest text-muted-foreground/40 font-medium">Text</span>
         <div className="flex items-center gap-0.5">
           <button onClick={() => setTranscriptFontSize(Math.max(10, transcriptFontSize - 1))} className="h-5 w-5 flex items-center justify-center rounded text-[0.6rem] text-muted-foreground/50 hover:bg-accent/40 transition-colors">A</button>

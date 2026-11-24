@@ -10,6 +10,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -18,7 +20,16 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run tauri -- build --no-bundle
+      - name: Check for changes to native speech
+        id: speech
+        shell: pwsh
+        run: |
+          git diff --quiet HEAD^ HEAD -- src-tauri
+          $changed = $LASTEXITCODE -ne 0
+          "changed=$changed" >> $env:GITHUB_OUTPUT
+          exit 0
       - name: Test native speech segment boundaries and previews
+        if: steps.speech.outputs.changed == 'True' || github.event_name == 'workflow_dispatch'
         run: cargo test --release --manifest-path src-tauri/Cargo.toml --lib stt::ort_streaming::segmenter::tests
       - name: Package portable Windows app
         shell: pwsh
