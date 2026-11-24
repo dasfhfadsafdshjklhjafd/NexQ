@@ -58,6 +58,7 @@ export function OverlayView() {
   const setCurrentView = useMeetingStore((s) => s.setCurrentView);
   const scenarioName = useScenarioStore((s) => s.getActiveTemplate().name);
   const [devLogOpen, setDevLogOpen] = useState(false);
+  const [servicesOpen, setServicesOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
   const [layoutMode, setLayoutMode] = useState<"split" | "ai" | "transcript">("split");
@@ -339,7 +340,7 @@ export function OverlayView() {
       {/* ═══ MAIN ═══ */}
       <div className="relative flex-1 min-h-0">
       <div className={`absolute inset-0 gap-2.5 overflow-hidden px-3 py-2.5 ${layoutMode === "split"
-        ? "grid grid-rows-[minmax(0,2fr)_minmax(0,3fr)] sm:grid-rows-1 sm:grid-cols-2"
+        ? "grid grid-rows-[minmax(0,1fr)_minmax(0,2fr)] sm:grid-rows-1 sm:grid-cols-2"
         : "flex"}`}>
 
         {/* ── LEFT: TRANSCRIPT ── */}
@@ -376,7 +377,7 @@ export function OverlayView() {
             <div className="flex shrink-0 items-center gap-1 border-b border-border/20 px-2.5 py-1.5">
               <ModeButtons />
             </div>
-            <div className="flex min-h-0 flex-1 flex-col p-3">
+            <div className="flex min-h-0 flex-1 flex-col p-1.5 sm:p-3">
               <AIResponsePanel />
             </div>
           </div>
@@ -416,7 +417,12 @@ export function OverlayView() {
 
       {/* ═══ FOOTER: Service Status ═══ */}
       <div className="border-t border-border/20">
-        <ServiceStatusBar compact />
+        <button type="button" aria-expanded={servicesOpen} aria-controls="overlay-connections"
+          className="block px-3 py-1 text-meta text-muted-foreground sm:hidden"
+          onClick={() => setServicesOpen(open => !open)}>Connections</button>
+        <div id="overlay-connections" className={`${servicesOpen ? "block" : "hidden"} sm:block`}>
+          <ServiceStatusBar compact />
+        </div>
       </div>
     </div>
   );
