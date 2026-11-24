@@ -30,6 +30,7 @@ export async function runUserAction(
   customQuestion?: string,
   opts: {
     requestId?: string;
+    questionId?: string;
     images?: ImageAttachment[];
     /**
      * The Notes / Tools pills when the user asks. Only an answer the user asked
@@ -53,8 +54,8 @@ export async function runUserAction(
     config.setContextScope({ ...setting, kind: "default" });
   }
 
-  if (customQuestion && (mode === "Assist" || mode === "AskQuestion")) {
-    useQuestionStore.getState().beginTracked(customQuestion, requestId);
+  if (!busy && customQuestion && (mode === "Assist" || mode === "AskQuestion")) {
+    useQuestionStore.getState().beginTracked(customQuestion, requestId, opts.questionId);
   }
   try {
     await generateAssist(mode, customQuestion, {

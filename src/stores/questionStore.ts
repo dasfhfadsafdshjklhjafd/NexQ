@@ -43,7 +43,8 @@ interface QuestionState {
   /** Whether the question panel has looked at this meeting's transcript yet. */
   panelSeen: boolean;
   generation: number;
-  queueSelection: (question: DetectedQuestion) => void;
+  queueSelection: (question: DetectedQuestion) => string | undefined;
+  addWatchedQuestion: (question: DetectedQuestion) => void;
   beginTracked: (text: string, requestId: string, segmentId?: string) => void;
   finishTracked: (requestId: string | null, answer: string) => void;
   rememberVariant: (id: string, text: string) => void;
@@ -77,23 +78,27 @@ export const useQuestionStore = create<QuestionState>((set, get) => ({
   questions: [],
   panelSeen: false,
   generation: 0,
-  queueSelection: (q) => set(state => {
-    const existing = state.questions.find(p => p.text === q.text && p.source === q.source);
-    if (existing?.requestId) return state;
-    if (existing) return {questions:state.questions.map(p => p === existing ?
-      {...p,manual:true,dismissed:false,heldBack:false,assisted:false,failed:false,answer:undefined} : p)};
-    return {questions:[{...q,segmentId:crypto.randomUUID(),assisted:false,manual:true},...state.questions]};
-  }),
+  addWatchedQuestion: q => set(s => ({questions:[{...q,segmentId:crypto.randomUUID(),assisted:false},...s.questions]})),
+  queueSelection: (q) => {
+    const own = (source:string) => /^(you|user)$/i.test(source);
+    const existing = get().questions.find(p => p.text === q.text && own(p.source) === own(q.source));
+    if (existing?.requestId) return;
+    const id = existing?.segmentId ?? crypto.randomUUID();
+    set(s => ({questions:existing ? s.questions.map(p => p === existing ?
+      {...p,segmentId:id,manual:true,dismissed:false,heldBack:false,assisted:false,failed:false} : p)
+      : [{...q,segmentId:id,assisted:false,manual:true},...s.questions]}));
+    return id;
+  },
   beginTracked: (text, requestId, segmentId) => set(state => {
     if (state.questions.some(q => q.requestId === requestId)) return state;
     const target = state.questions.find(q => !q.dismissed && q.text === text && (!segmentId || q.segmentId === segmentId));
-    if (!target) return state;
-    return {questions:state.questions.map(q => q === target ? {...q, assisted:true, requestId, failed:false} : q)};
+    if (!target || target.requestId) return state;
+    return {questions:state.questions.map(q => q === target ? {...q, assisted:true, requestId, failed:false, heldBack:false} : q)};
   }),
   finishTracked: (requestId, answer) => set(state => {
     if (!requestId || !state.questions.some(q => q.requestId === requestId)) return state;
     return {questions:state.questions.map(q => q.requestId === requestId ?
-      {...q, requestId:undefined, answer:answer || q.answer, assisted:!!answer, failed:!answer, heldBack:!answer} : q)};
+      {...q, requestId:undefined, answer:answer || q.answer, assisted:!!(answer || q.answer), failed:!answer && !q.answer, heldBack:!answer && !q.answer} : q)};
   }),
   rememberVariant: (id, text) => set(state => ({questions:state.questions.map(q =>
     q.segmentId === id && q.text !== text && !q.variants?.includes(text)
@@ -170,7 +175,7 @@ export const useQuestionStore = create<QuestionState>((set, get) => ({
     set((state) => ({
       questions: state.questions.map((q) =>
         (segmentId !== undefined ? q.segmentId === segmentId : q.text === text)
-          ? { ...q, assisted: false, heldBack: true }
+          ? { ...q, requestId:undefined, assisted:!!q.answer, heldBack:!q.answer }
           : q),
     })),
 

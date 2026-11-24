@@ -172,10 +172,10 @@ export function TranscriptPanel({ onOpenDevLog }: { onOpenDevLog?: () => void } 
     if (!selection) return;
     const {autoTrigger,questionDetection} = useAIActionsStore.getState().configs.globalDefaults;
     const store = useQuestionStore.getState();
-    store.queueSelection({...selection,confidence:1});
-    if (!(autoTrigger && questionDetection)) {
-      void runYourAction("AskQuestion",selection.text).catch(() => {
-        store.holdBack(undefined,selection.text);
+    const id = store.queueSelection({...selection,confidence:1});
+    if (id && !(autoTrigger && questionDetection)) {
+      void runYourAction("AskQuestion",selection.text,undefined,id).catch(() => {
+        store.holdBack(id,selection.text);
         showToast("Could not answer the selection","error");
       });
     }

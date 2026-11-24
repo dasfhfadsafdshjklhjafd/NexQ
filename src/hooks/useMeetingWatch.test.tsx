@@ -24,6 +24,25 @@ describe("meeting watcher",() => {
     expect(scanBatch([line("a",text)],checked).batch).toHaveLength(0);
     expect(scanBatch([line("a",text.replace("abc","xyz"))],checked).batch[0].text.startsWith("xyz")).toBe(true);
   });
+  it("sends only new words after an append, with the previous sentence as context",() => {
+    const prior = "Why use an index? Now how";
+    const result = scanBatch([line("a",prior+" does it affect writes?")],new Map([["a",prior]]));
+    expect(result.batch[0].text).toBe(" does it affect writes?");
+    expect(result.context).toContain(prior);
+  });
+  it("keeps an active request attached to its row through repeated clicks and cancellation",() => {
+    const store = useQuestionStore.getState();
+    store.clear();
+    store.addWatchedQuestion({text:"Why?",timestamp_ms:1,source:"Them",confidence:1});
+    const id = useQuestionStore.getState().questions[0].segmentId!;
+    store.beginTracked("Why?","first",id);
+    store.beginTracked("Why?","another",id);
+    expect(useQuestionStore.getState().questions[0].requestId).toBe("first");
+    store.holdBack(id,"Why?");
+    store.finishTracked("first","");
+    expect(useQuestionStore.getState().questions[0]).toMatchObject({heldBack:true,requestId:undefined,failed:false});
+    store.clear();
+  });
   it("scans during an answer, groups a restatement and retains a distinct follow-up",async () => {
     vi.useFakeTimers();
     const before = useConfigStore.getState();

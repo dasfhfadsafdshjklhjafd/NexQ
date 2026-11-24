@@ -178,7 +178,7 @@ export function QuestionDetector() {
   const justMountedRef = useRef(true);
   const segments = useTranscriptStore((s) => s.segments);
   const autoTrigger = useAIActionsStore((s) => s.configs.globalDefaults.autoTrigger);
-  const watch = useMeetingWatch(autoTrigger);
+  const watch = useMeetingWatch(true);
   const local = watch.mode === "local";
   const busy = useStreamStore((s) => s.isStreaming || s.phase === "sending");
 
@@ -186,7 +186,7 @@ export function QuestionDetector() {
     if (!local) return;
     const p = onQuestionDetected((event) => {
       if (isOtherParty(event.source)) {
-        addQuestion(event);
+        addQuestion(event,crypto.randomUUID());
       }
     });
     return () => { p.then((u) => u()); };
@@ -254,12 +254,12 @@ export function QuestionDetector() {
 
   const handleAssist = useCallback((index: number) => {
     const question = questions[index];
-    if (!question) return;
+    if (!question || question.requestId) return;
     // Its automatic answer is on the way: a click doesn't restart it.
     const store = useQuestionStore.getState();
-    if (autoAnswerRunning() && sameQuestion(store.autoAnswer?.question, question.text)) return;
+    if (autoAnswerRunning() && store.autoAnswer?.segmentId === question.segmentId) return;
     store.markAssisted(index);
-    runYourAction("Assist", question.text).catch((err) => {
+    runYourAction("Assist", question.text, undefined, question.segmentId).catch((err) => {
       // No answer came, so it stays a card to click.
       useQuestionStore.getState().holdBack(question.segmentId, question.text);
       showToast(String(err).includes(REFUSED) ? "Another answer is still running" : "Couldn't generate AI response", "error");
@@ -271,8 +271,9 @@ export function QuestionDetector() {
     useQuestionStore.getState().dismiss(index);
   }, []);
 
-  const visible = questions.filter(q => !q.dismissed && isOtherParty(q.source));
+  const visible = questions.filter(q => !q.dismissed && (isOtherParty(q.source) || q.manual));
   const latest = visible[0] || null;
+  const latestStatus = latest?.requestId ? "Answering" : latest?.answer ? "Answered" : latest?.assisted ? "Sent" : "Assist";
   const previousQuestions = visible.slice(1, 4);
 
   // Settle the question itself. Unrelated narration must not postpone it.
@@ -292,9 +293,9 @@ export function QuestionDetector() {
       if (index < 0 || pending.assisted || pending.heldBack) return;
       store.markAssisted(index);
       startAutoAnswer(pending, pending.segmentId, false, "after the question settled");
-    }), AUTO_TRIGGER_DELAY_MS);
+    }), local && !pending.manual ? AUTO_TRIGGER_DELAY_MS : 0);
     return () => clearTimeout(timer);
-  }, [autoTrigger, pending, busy, revising, partialContinuation]);
+  }, [autoTrigger, pending, busy, revising, partialContinuation, local]);
 
   return (
     <div className="flex flex-col gap-2.5" role="region" aria-label="Detected questions">
@@ -308,7 +309,7 @@ export function QuestionDetector() {
         onKeyDown={(e) => { if (latest && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); handleAssist(questions.indexOf(latest)); } }}
         role={latest ? "button" : undefined}
         tabIndex={latest ? 0 : undefined}
-        aria-label={latest ? `Question: ${latest.text}. ${latest.assisted ? "Answered" : "Click to assist"}` : undefined}
+        aria-label={latest ? `Question: ${latest.text}. ${latestStatus}` : undefined}
       >
         <div className="relative mt-0.5 shrink-0" aria-hidden="true">
           <HelpCircle className={`h-5 w-5 transition-colors ${latest ? "text-info" : "text-muted-foreground/50"}`} />
@@ -338,7 +339,7 @@ export function QuestionDetector() {
           <div className="flex shrink-0 items-center gap-1">
             <button
               onClick={(e) => { e.stopPropagation(); handleAssist(questions.indexOf(latest)); }}
-              aria-label={latest.assisted ? "Already answered" : "Get AI assistance for this question"}
+              aria-label={latest.assisted ? latestStatus : "Get AI assistance for this question"}
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-150 cursor-pointer ${
                 latest.assisted
                   ? "bg-success/10 border border-success/20 text-success"
@@ -346,7 +347,7 @@ export function QuestionDetector() {
               }`}
             >
               {latest.assisted ? (
-                <><Check className="h-3.5 w-3.5" aria-hidden="true" />Answered</>
+                <><Check className="h-3.5 w-3.5" aria-hidden="true" />{latestStatus}</>
               ) : (
                 <><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />Assist</>
               )}

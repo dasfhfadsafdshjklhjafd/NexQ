@@ -16,13 +16,16 @@ export function scanBatch(lines: Line[], checked: Map<string,string>) {
   for (const line of lines) {
     const prior = checked.get(line.id) || "";
     if (!line.text.trim() || prior === line.text) {
-      if (!batch.length) context = (context + "\n" + speaker(line) + ": " + line.text).slice(-3000);
+      if (batch.length) break;
+      context = (context + "\n" + speaker(line) + ": " + line.text).slice(-3000);
       continue;
     }
     let start = 0;
     while (start < prior.length && prior[start] === line.text[start]) start++;
     const end = Math.min(start + 3500,line.text.length);
-    const text = line.text.slice(Math.max(0,start-300),end);
+    if (start && batch.length) break;
+    if (start) context = (context + "\n" + speaker(line) + ": " + line.text.slice(Math.max(0,start-1200),start)).slice(-3000);
+    const text = line.text.slice(start,end);
     batch.push({line,text,prefix:line.text.slice(0,end)});
     if (batch.length >= 6 || end < line.text.length) break;
   }
@@ -72,11 +75,15 @@ export function useMeetingWatch(on: boolean) {
           if (result.version !== 1) throw Error("Unsupported watcher");
           supported = true;
         }
-        setMode("watching");
-        const {batch,context} = scanBatch(finals(),checked);
+        if (failures < 2) setMode("watching");
+        const next = scanBatch(finals(),checked);
+        for (const b of next.batch) if (!b.text.trim()) checked.set(b.line.id,b.prefix);
+        const batch = next.batch.filter(b => b.text.trim());
+        const {context} = next;
+        if (next.batch.length && !batch.length) { updateProgress(); again = 0; }
         if (!batch.length) return;
         const store = useQuestionStore.getState();
-        const known = store.questions.filter(q => q.segmentId).slice(0,80);
+        const known = store.questions.filter(q => q.segmentId).slice(0,80).reverse();
         const payload = {context,known:known.map(q => ({speaker:speaker({speaker:q.source}),text:q.text.slice(0,1000)})),
           lines:batch.map(b => ({speaker:speaker(b.line),text:b.text}))};
         const {questions} = await invoke<{questions:Found[]}>("scan_interview_transcript",{baseUrl:url,payload});
@@ -91,17 +98,18 @@ export function useMeetingWatch(on: boolean) {
           if (q.sameAs !== null && known[q.sameAs]?.segmentId) {
             store.rememberVariant(known[q.sameAs].segmentId!,q.text);
           } else {
-            store.addLineQuestion({text:q.text,source:line.speaker,timestamp_ms:line.timestamp_ms,confidence:1},crypto.randomUUID());
+            store.addWatchedQuestion({text:q.text,source:line.speaker,timestamp_ms:line.timestamp_ms,confidence:1});
           }
         }
         batch.forEach((b,i) => {if (valid[i]) checked.set(b.line.id,b.prefix);});
         failures = 0;
+        setMode("watching");
         updateProgress();
         again = 200;
       } catch {
         if (!alive()) return;
         if (!supported) {setMode("local"); again = 30000;}
-        else {failures++; setMode("retrying"); again = Math.min(30000,3000*failures);}
+        else {failures++; setMode(failures >= 2 ? "local" : "retrying"); again = Math.min(30000,3000*failures);}
       } finally {
         running = false;
         if (again !== undefined) schedule(again);

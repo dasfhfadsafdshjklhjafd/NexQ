@@ -102,7 +102,7 @@ describe("Auto-Answer with the provider's turn signals (Cartesia, Deepgram Flux)
     // The quiet wait doesn't answer it a second time.
     await act(async () => { await vi.advanceTimersByTimeAsync(AUTO_TRIGGER_DELAY_MS * 3); });
     expect(runUserAction).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Answered")).toBeTruthy();
+    expect(screen.getByText("Answering")).toBeTruthy();
   });
 
   it("starts early on 'probably done' and keeps that answer when the turn ends the same", async () => {
@@ -307,7 +307,7 @@ describe("QuestionPanel", () => {
     expect(runUserAction).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Get AI assistance for this question" }));
-    expect(runUserAction).toHaveBeenCalledWith("Assist", "What would you do first?");
+    expect(runUserAction).toHaveBeenCalledWith("Assist", "What would you do first?", {questionId:"them_1#0"});
   });
 
   it("shows nothing and answers nothing with detection off", () => {
@@ -334,10 +334,11 @@ describe("QuestionPanel coming back (layout switch, Settings)", () => {
     expect(runUserAction).toHaveBeenCalledTimes(1);
 
     unmount();
+    act(() => useQuestionStore.getState().finishTracked(requestOf(0)!, "Start with the requirements."));
     render(<QuestionPanel />);
     act(() => vi.advanceTimersByTime(AUTO_TRIGGER_DELAY_MS * 3));
     expect(runUserAction).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Already answered" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Answered" })).toBeTruthy();
   });
 
   it("shows a question asked while away without answering it, then answers the next one", () => {
@@ -534,7 +535,7 @@ describe("Personal sources and automatic answers", () => {
     fireEvent.click(screen.getByText(/Which database did you pick\?/));
     await settle();
     expect(vi.mocked(runUserAction)).toHaveBeenCalledWith(
-      "Assist", "Which database did you pick?", { sources: { notes: true, tools: true } },
+      "Assist", "Which database did you pick?", { questionId:"them_old", sources: { notes: true, tools: true } },
     );
   });
 });
